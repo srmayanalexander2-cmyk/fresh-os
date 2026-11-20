@@ -2,7 +2,7 @@
 #define FRESH_COMPAT_H
 #include "platform.h"
 #define FILE_LIMIT (2u << 20)
-#define DEX_LIMIT (1u << 20)
+#define IMP_LIMIT (FILE_LIMIT + 4 * (FILE_LIMIT / 4096) + 32)
 typedef unsigned long long u64;
 /* Synchronous, bounded guest runtimes. They never call an address from a file. */
 typedef struct {
@@ -11,6 +11,6 @@ typedef struct {
     int bits;
 } PeResult;
 int pe_run(const u8 *file, u32 size, PeResult *result);
-const char *android_activity(const u8 *, u32);
-const char *apk_activity(const u8 *, u32, const char **error);
+u32 imp_convert(const u8 *, u32, u8 *, u32, PeResult *);
+int imp_run(const u8 *, u32, PeResult *);
 #endif

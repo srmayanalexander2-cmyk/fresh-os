@@ -1,10 +1,9 @@
 #include "draw.h"
 #include "packages.h"
 #include "compat.h"
-static u8 imported[FILE_LIMIT];
+static u8 imported[IMP_LIMIT], converted[IMP_LIMIT];
 static PeResult pe_result;
-static int pe_ran, pe_ok, apk_ran;
-static char activity_text[320], activity_status[128];
+static int pe_ran, pe_ok, last_imp;
 #include "util.h"
 #include "storage.h"
 #ifndef EDITION
@@ -24,7 +23,6 @@ enum {
     TERM,
     MINES,
     SYSTEM,
-    ANDROID,
     CALENDAR,
     TASKMGR,
     WINDOWS,
@@ -35,13 +33,12 @@ struct App {
     u32 color;
 };
 static const struct App apps[] = {
-    {"Files", "files", "F", 0xf2c443},       {"Writer", "writer", "W", 0x79badf},
-    {"Paint", "paint", "P", 0xff849e},       {"Calculator", "calc", "+", 0x83c88c},
-    {"Clock", "clock", "C", 0x52cdde},       {"Settings", "settings", "S", 0x86a6bf},
-    {"Terminal", "term", ">", 0x5684a2},     {"Minefield", "mines", "*", 0xf5a654},
-    {"System", "system", "i", 0xb698d1},     {"Android", "android", "A", 0x9cda6d},
-    {"Calendar", "calendar", "D", 0x6fd4bd}, {"Tasks", "monitor", "T", 0xc2b7f1},
-    {"EXE Runner", "exe", "E", 0x60afe0}};
+    {"Files", "files", "F", 0xf2c443},   {"Writer", "writer", "W", 0x79badf},
+    {"Paint", "paint", "P", 0xff849e},   {"Calculator", "calc", "+", 0x83c88c},
+    {"Clock", "clock", "C", 0x52cdde},   {"Settings", "settings", "S", 0x86a6bf},
+    {"Terminal", "term", ">", 0x5684a2}, {"Minefield", "mines", "*", 0xf5a654},
+    {"System", "system", "i", 0xb698d1}, {"Calendar", "calendar", "D", 0x6fd4bd},
+    {"Tasks", "monitor", "T", 0xc2b7f1}, {"Programs", "programs", "E", 0x60afe0}};
 static int welcome = 1, active = -1, hidden[NAPPS], menu, tray, choice, cli, shutdown, widget,
            wall, color, motion = !LITE, dim = 10, vol = 5, dirty = 1;
 static int wx = 218, wy = 64, dgx, dgy, drag, shift, caps, progress, velocity, goal;
@@ -76,27 +73,23 @@ static void clockread(void) {
     *p++ = '/';
     num(p, day);
 }
-static void runapk(const u8 *data, u32 size) {
-    const char *error = 0, *message;
-    if (size >= 4 && data[0] == 'd' && data[1] == 'e' && data[2] == 'x' && data[3] == 10)
-        message = android_activity(data, size); /* pre-R1 Home records */
-    else
-        message = apk_activity(data, size, &error);
-    copy(activity_text, message ? message : "", sizeof activity_text);
-    copy(activity_status,
-         message ? "Launcher Activity completed"
-         : error ? error
-                 : "Unsupported legacy Activity",
-         sizeof activity_status);
-    apk_ran = 1;
-    serial(message ? "DEX Activity rendered\r\n" : "APK rejected\r\n");
-}
-static void runexe(const u8 *data, u32 size) {
-    pe_ok = pe_run(data, size, &pe_result);
+static void runprogram(const u8 *p, u32 n, int imp) {
+    last_imp = imp;
+    if (!imp) {
+        // Launch-time linking is temporary. Only an explicit Convert writes a Home record.
+        n = imp_convert(p, n, imported, sizeof imported, &pe_result);
+        p = imported;
+    }
+    pe_ok = n && imp_run(p, n, &pe_result);
     pe_ran = 1;
-    serial(pe_ok ? (pe_result.bits == 64 ? "PE64 completed\r\n" : "PE32 completed\r\n")
-                 : "EXE rejected\r\n");
+    serial(pe_ok
+               ? (imp ? (pe_result.bits == 64 ? "IMP64 completed\r\n" : "IMP32 completed\r\n")
+                      : (pe_result.bits == 64 ? "EXE to IMP64 completed\r\n"
+                                              : "EXE to IMP32 completed\r\n"))
+               : "Program rejected\r\n");
 }
+static void launch(int);
+#include "workspace.inc"
 static void launch(int id) {
     if (id < 0 || id >= NAPPS)
         return;
@@ -106,10 +99,14 @@ static void launch(int id) {
     lift = motion ? 22 : 0;
     lift_speed = 0;
     hidden[id] = 0;
-    if (id == ANDROID && !apk_ran)
-        runapk(base_apk, BASE_APK_SIZE);
+    if (id == FILES) {
+        file_refresh();
+        fileidx = 0;
+    }
+    if (id == WRITER)
+        editpos = clamp(editpos, 0, len(note));
     if (id == WINDOWS && !pe_ran)
-        runexe(hello32, HELLO32_SIZE);
+        runprogram(imp32, IMP32_SIZE, 1);
     menu = tray = widget = shutdown = 0;
     goal = progress = velocity = 0;
     dirty = 1;
@@ -306,7 +303,8 @@ static void command(void) {
     if (!*s)
         return;
     say(s);
-    if (prefix(s, "open ")) {
+    int opening = prefix(s, "open ");
+    if (opening) {
         for (int i = 5, n = len(s); i <= n; i++)
             s[i - 5] = s[i];
     }
@@ -315,43 +313,33 @@ static void command(void) {
             launch(i);
             return;
         }
-    int sl = len(s);
-    int forcedapk = prefix(s, "apk "), forcedexe = prefix(s, "exe ");
-    int apk = forcedapk || (!forcedexe && sl > 4 && eq(s + sl - 4, ".apk"));
-    int exe = forcedexe || (!forcedapk && sl > 4 && eq(s + sl - 4, ".exe"));
-    if (apk || exe) {
-        const char *file = forcedapk || forcedexe ? s + 4 : s;
-        int demo = eq(file, "demo");
-        int n = demo ? -2 : home_read(file, imported, sizeof imported);
-        if (n > 0) {
-            if (apk)
-                runapk(imported, n);
-            else
-                runexe(imported, n);
-        } else if (n == -2 && apk && (demo || eq(file, "base.apk")))
-            runapk(base_apk, BASE_APK_SIZE);
-        else if (n == -2 && exe && (demo || eq(file, "hello32.exe")))
-            runexe(hello32, HELLO32_SIZE);
-        else if (n == -2 && exe && eq(file, "hello64.exe"))
-            runexe(hello64, HELLO64_SIZE);
-        else {
-            say(n == -2 ? "Package not found. Type storage."
-                        : "Package empty, corrupt, unreadable, or over 2 MiB.");
-            return;
-        }
-        launch(apk ? ANDROID : WINDOWS);
+    if (opening) {
+        open_file(s);
+        return;
+    }
+    if (prefix(s, "convert ")) {
+        convert_file(s + 8);
+        return;
+    }
+    if (prefix(s, "imp ") || prefix(s, "exe ")) {
+        open_file(s + 4);
+        return;
+    }
+    if (!prefix(s, "save ") && !prefix(s, "load ") &&
+        (suffix(s, ".imp") || suffix(s, ".exe") || suffix(s, ".txt"))) {
+        open_file(s);
         return;
     }
     if (eq(s, "start") || eq(s, "apps")) {
         say("START  |  Type an app name, then Enter.");
         say("files   writer   paint   calc   clock   settings   term   mines   system");
-        say("android   calendar   monitor   exe");
+        say("calendar   monitor   programs   /   convert NAME.exe   open NAME.imp");
     } else if (eq(s, "help")) {
         say("start / apps   open NAME   tasks   resume NAME   clear   gui   cli");
         say("wall sky|lagoon|paint   color mint|ice|sun|white   time   cat note   storage");
     } else if (eq(s, "storage")) {
         say(disk_status());
-        say("save NAME / load NAME    savecanvas    prefs    ls    apk/exe NAME    install");
+        say("save NAME / load NAME    savecanvas    prefs    ls    IMP/EXE    install");
     } else if (eq(s, "install"))
         open_setup();
     else if (eq(s, "prefs"))
@@ -363,21 +351,9 @@ static void command(void) {
         if (!home_list(say))
             say("No Fresh Home mounted.");
     } else if (prefix(s, "save ")) {
-        if (eq(s + 5, "profile") || eq(s + 5, "canvas"))
-            say("Reserved name.");
-        else
-            say(home_save(s + 5, note, len(note)) ? "Note saved."
-                                                  : "Not saved. Use a-z, digits, dot, dash, "
-                                                    "underscore; 31 max. Check storage.");
+        write_document(s + 5);
     } else if (prefix(s, "load ")) {
-        char tmp[sizeof note];
-        int n = home_read(s + 5, tmp, sizeof(tmp) - 1);
-        if (n >= 0) {
-            tmp[n] = 0;
-            copy(note, tmp, sizeof note);
-            say("Loaded into Writer.");
-        } else
-            say("Note not found or unreadable.");
+        open_file(s + 5);
     } else if (eq(s, "tasks")) {
         int any = 0;
         for (int i = 0; i < NAPPS; i++)
@@ -434,27 +410,11 @@ static void bg(void) {
                 screen[y][x] = paint[y * 198 / H][x * 466 / W];
 }
 static void icon(int x, int y, int i, int r) {
-    static const u16 *const glyphs[] = {ICON0, ICON1, ICON2, ICON3,  ICON4,  ICON5, ICON6,
-                                        ICON7, ICON8, ICON9, ICON10, ICON11, ICON6};
+    static const u16 *const glyphs[] = {ICON0, ICON1, ICON2, ICON3,  ICON4,  ICON5,
+                                        ICON6, ICON7, ICON8, ICON10, ICON11, ICON9};
     sprite(glyphs[i], 64, 64, x, y, r, r, 1);
 }
-static void rail(void) { /* Keep the reference rail silhouette; don't paint old sky over a new
-                            wallpaper. */
-    for (int y = 0; y < 333; y++)
-        for (int x = 0; x < 34; x++) {
-            int ok = y < 221   ? x < 31
-                     : y < 241 ? ((x - 15) * (x - 15) + (y - 221) * (y - 221) < 360)
-                               : ((x + 24) * (x + 24) + (y - 282) * (y - 282) < 3300);
-            if (ok)
-                screen[y][x] = rgb(RAIL[y * 34 + x]);
-        }
-    gel(2, 2, 27, 24, 12, WHITE, 0x5baaf7, 0x156cc0);
-    text(10, 4, "F", 1, WHITE);
-    box(2, 27, 27, 12, 0x9cefff);
-    text(3, 26, "Files", 0, INK);
-    text(1, 147, tim, 0, INK);
-    text(1, 159, date, 0, INK);
-}
+#include "desktop.inc"
 static void bubble(int x, int y, int w, int h, u32 mid) {
     gel(x, y, w, h, h / 2, WHITE, mid, mix(mid, WHITE, 154));
     for (int j = 0; j < 13; j++)
@@ -542,8 +502,8 @@ static void settings(int x, int y) {
         }
         badge(x + 307, yy, i >= 4 ? b : opts[i], i == 0);
     }
-    text(x, y + 212, "Click a value to cycle it. F3 toggles the shell from anywhere.", 0,
-         INK);
+    text(x, y + 215, "Select a value or press 1-6 to change it.", 0, INK);
+    pill(x + 307, y + 208, 114, 31, "Save profile", 1);
 }
 static int monthoff;
 static void calendar(int x, int y) {
@@ -593,6 +553,7 @@ static void wrapped(int x, int y, int width, const char *s) {
             tx = text(tx, y, b, 1, INK);
     }
 }
+#include "editors.inc"
 static void window(void) {
     int x = wx, y = clamp(wy + lift, 0, H - 311), a = active;
     gel(x + 3, y + 6, 506, 311, 15, 0x769ca6, 0x637f8b, 0xa4bcc1);
@@ -600,19 +561,14 @@ static void window(void) {
     gel(x + 2, y + 30, 502, 279, 12, 0xf9ffff, 0xeaf7f9, 0xf7fdfd);
     icon(x + 9, y + 3, a, 23);
     text(x + 38, y + 5, apps[a].name, 1, INK);
-    text(x + 412, y + 7, "_", 1, INK);
-    text(x + 469, y + 4, "x", 1, INK);
+    pill(x + 395, y + 3, 41, 21, "-", 0);
+    pill(x + 450, y + 3, 41, 21, "x", 0);
     int xx = x + 19, yy = y + 45;
-    if (a == ANDROID) {
-        text(xx, yy, "Android Activity", 2, INK);
-        text(xx, yy + 39, "DALVIK BYTECODE    /    TEXTVIEW", 0, 0x347e65);
-        wrapped(xx, yy + 83, 444, activity_text[0] ? activity_text : activity_status);
-        text(xx, yy + 212, "R1   /   Standalone APK loader and TextView runtime", 0, INK);
-    }
     if (a == WINDOWS) {
-        text(xx, yy, "Windows executable", 2, INK);
-        text(xx, yy + 39, pe_result.bits == 64 ? "PE32+    /    x86-64" : "PE    /    x86", 0,
-             0x347e65);
+        text(xx, yy, last_imp ? "IMP application" : "Windows EXE  /  linked as IMP", 2, INK);
+        text(xx, yy + 39,
+             pe_result.bits == 64 ? "INTERPRETED    /    x86-64" : "INTERPRETED    /    x86",
+             0, 0x347e65);
         wrapped(xx, yy + 70, 445, pe_ok ? pe_result.output : pe_result.detail);
         char code[16];
         num(code, (int)pe_result.exit_code);
@@ -643,7 +599,7 @@ static void window(void) {
     if (a == SETTINGS)
         settings(xx, yy);
     if (a == SYSTEM) {
-        text(xx, yy, "FreshOS Release 1", 2, INK);
+        text(xx, yy, "FreshOS Current", 2, INK);
         text(xx, yy + 36, EDITION " edition   /   native live kernel", 1, INK);
         text(xx, yy + 72,
 #ifdef EFI
@@ -658,47 +614,10 @@ static void window(void) {
         text(xx, yy + 172, "F1  Launcher     F2 / Win  Tray     F3  GUI / CLI", 1, INK);
         text(xx, yy + 198, "F4  Minimize     Esc  Back     F6 / F7  Sound / Light", 1, INK);
     }
-    if (a == FILES) {
-        text(xx, yy, "Live workspace", 2, INK);
-        text(xx, yy + 36,
-             home_ready() ? "Fresh Home mounted. Use Terminal to save your work."
-                          : "Session files stay in memory until you power off.",
-             1, INK);
-        badge(xx, yy + 81, "Note.txt", 0);
-        badge(xx + 130, yy + 81, "Canvas", 0);
-        text(xx, yy + 134, "Release 1   /   Included packages", 0, INK);
-        badge(xx, yy + 158, "base.apk", 0);
-        badge(xx + 130, yy + 158, "hello32.exe", 0);
-        badge(xx + 260, yy + 158, "hello64.exe", 0);
-    }
-    if (a == WRITER) {
-        // Find the last twelve visual lines so the insertion point never scrolls offscreen.
-        int starts[12] = {0}, row = 0, width = 0;
-        for (int i = 0; note[i]; i++) {
-            unsigned ch = (u8)note[i];
-            int adv = ch >= 32 && ch <= 126 ? fonts[0].adv[ch - 32] : 0;
-            if (ch == '\n' || width + adv > 451) {
-                starts[++row % 12] = i + (ch == '\n');
-                width = 0;
-            }
-            width += adv;
-        }
-        int tx = xx, ty = yy;
-        for (int i = row >= 12 ? starts[(row - 11) % 12] : 0; note[i]; i++) {
-            unsigned ch = (u8)note[i];
-            int adv = ch >= 32 && ch <= 126 ? fonts[0].adv[ch - 32] : 0;
-            if (ch == '\n' || tx + adv > xx + 451) {
-                tx = xx;
-                ty += 17;
-            }
-            if (ch != '\n') {
-                char c[2] = {ch, 0};
-                tx = text(tx, ty, c, 0, INK);
-            }
-        }
-        box(tx, ty + 2, 2, 12, MINT);
-        text(xx, y + 278, "Note.txt   /   Session memory   /   Backspace to edit", 0, INK);
-    }
+    if (a == FILES)
+        files_draw(xx, yy);
+    if (a == WRITER)
+        writer_draw(xx, yy);
     if (a == PAINT) {
         for (int j = 0; j < 198; j++)
             for (int i = 0; i < 466; i++)
@@ -708,6 +627,7 @@ static void window(void) {
                 box(xx + i * 32 - 2, yy + 207, 28, 27, INK);
             box(xx + i * 32, yy + 209, 24, 23, paints[i]);
         }
+        pill(xx + 208, yy + 205, 96, 31, "Save canvas", 0);
         badge(xx + 315, yy + 205, "Set wallpaper", 1);
     }
     if (a == CALC) {
@@ -753,10 +673,7 @@ static void window(void) {
 }
 static void render(void) {
     if (welcome) {
-        sprite(WELCOME, WELCOME_W, WELCOME_H, 0, 0, W, H, 0);
-        gel(12, H - 29, 221, 21, 10, 0xf9ffff, 0xb1eaf1, 0xdfffff);
-        text(20, H - 26, "Release 1  /  " EDITION " live  /  Enter to begin", 0, INK);
-        badge(W - 132, H - 44, "Install  /  I", 0);
+        welcome_view();
     } else {
         bg();
         if (!cli)
@@ -819,6 +736,25 @@ static void render(void) {
         if (!finished)
             badge(611, 341, "Install / I", 1);
     }
+    if (pending_doc[0]) {
+        glass(318, 181, 326, 167, 27, 0xc6f4e9, 248);
+        text(343, 196, "Unsaved changes", 2, INK);
+        text(343, 251, "Discard edits and open another file?", 1, INK);
+        pill(345, 299, 112, 30, "Keep edits", 1);
+        pill(502, 299, 112, 30, "Discard", 0);
+    }
+    if (savebox) {
+        glass(318, 181, 326, 167, 27, 0xc6f4e9, 248);
+        text(343, 196, "Save document as", 2, INK);
+        box(345, 249, 267, 30, WHITE);
+        text(351, 253, savename, 1, INK);
+        pill(345, 299, 112, 30, "Cancel", 0);
+        pill(502, 299, 112, 30, "Save", 1);
+    }
+    if (feedback[0] && (int)(feedback_until - ticks) > 0) {
+        glass(136, 485, 687, 36, 18, 0xe0fff3, 238);
+        text(154, 496, feedback, 0, INK);
+    }
     if (dim < 10) {
         int k = 90 + dim * 16;
         for (int j = 0; j < H; j++)
@@ -858,12 +794,26 @@ static int inside(int x, int y, int a, int b, int w, int h) {
     return x >= a && x < a + w && y >= b && y < b + h;
 }
 void pointer(int old, int x, int y) {
-    if (cli && active < 0 && !setup && !welcome)
+    if (cli && active < 0 && !setup && !welcome && !pending_doc[0])
         return;
     dirty = 1;
     int click = (buttons & 1) && !(old & 1);
     if (!(buttons & 1))
         drag = 0;
+    if (pending_doc[0]) {
+        if (click && inside(x, y, 345, 299, 112, 30))
+            discard_choice(0);
+        else if (click && inside(x, y, 502, 299, 112, 30))
+            discard_choice(1);
+        return;
+    }
+    if (savebox) {
+        if (click && inside(x, y, 502, 299, 112, 30))
+            write_document(savename);
+        else if (click && inside(x, y, 345, 299, 112, 30))
+            savebox = 0;
+        return;
+    }
     if (setup) {
         if (click && inside(x, y, 225, 341, 114, 31))
             setup = 0;
@@ -872,9 +822,9 @@ void pointer(int old, int x, int y) {
         return;
     }
     if (welcome) {
-        if (click && inside(x, y, W - 132, H - 44, 114, 31))
+        if (click && inside(x, y, 418, 389, 150, 32))
             open_setup();
-        else if (click && inside(x, y, 456, 367, 108, 173))
+        else if (click && inside(x, y, 395, 329, 196, 43))
             enter();
         return;
     }
@@ -887,7 +837,7 @@ void pointer(int old, int x, int y) {
         return;
     }
     if (drag) {
-        wx = clamp(x - dgx, 0, W - 510);
+        wx = clamp(x - dgx, cli ? 0 : 82, W - 510);
         wy = clamp(y - dgy, 0, H - 320);
         return;
     }
@@ -927,19 +877,33 @@ void pointer(int old, int x, int y) {
         launcher();
         return;
     }
-    if (!cli && click && x < 35) {
-        if (y < 42)
-            launch(FILES);
-        else if (y >= 140 && y < 171)
-            launch(CLOCK);
-        else if (y >= 171 && y < 194)
-            tasks();
-        else if (y >= 194 && y < 218)
-            widget = 2;
-        else if (y >= 218 && y < 243)
-            widget = 1;
-        else if (y >= 244 && y < 332)
+    if (!cli && click && dock_at(x, y) >= 0) {
+        switch (dock_at(x, y)) {
+        case DOCK_APPS:
             launcher();
+            break;
+        case DOCK_FILES:
+            launch(FILES);
+            break;
+        case DOCK_WRITER:
+            launch(WRITER);
+            break;
+        case DOCK_SETTINGS:
+            launch(SETTINGS);
+            break;
+        case DOCK_CLOCK:
+            launch(CLOCK);
+            break;
+        case DOCK_TRAY:
+            tasks();
+            break;
+        case DOCK_LIGHT:
+            widget = 2;
+            break;
+        case DOCK_SOUND:
+            widget = 1;
+            break;
+        }
         return;
     }
     if (active < 0)
@@ -971,26 +935,39 @@ void pointer(int old, int x, int y) {
         monthoff = clamp(monthoff + (a < 375 ? -1 : 1), -1200, 1200);
     if (active == SETTINGS && inside(a, b, 307, 0, 114, 204))
         setting(b / 34);
-    if (active == FILES && b >= 158 && b < 189 && a >= 0 && a < 374 && a % 130 < 114) {
-        int i = a / 130;
-        if (!i)
-            runapk(base_apk, BASE_APK_SIZE);
-        else if (i == 1)
-            runexe(hello32, HELLO32_SIZE);
-        else
-            runexe(hello64, HELLO64_SIZE);
-        launch(i ? WINDOWS : ANDROID);
+    if (active == FILES) {
+        file_click(a, b);
         return;
     }
-    if (active == FILES && b >= 81 && b < 112) {
-        if (a >= 0 && a < 114)
-            launch(WRITER);
-        if (a >= 130 && a < 244)
-            launch(PAINT);
+    if (active == TASKMGR && a >= 0 && a < 430 && b >= 73 && b < 217) {
+        int id = nth((a / 215) * 6 + (b - 73) / 24);
+        if (id >= 0)
+            launch(id);
+        return;
+    }
+    if (active == WRITER) {
+        if (b >= 221 && b < 252) {
+            if (a >= 226 && a < 340)
+                write_document(document);
+            if (a >= 350 && a < 464) {
+                savebox = 1;
+                copy(savename, document, 32);
+            }
+            return;
+        }
+        writer_place(a, b);
+    }
+    if (active == SETTINGS && inside(a, b, 307, 208, 114, 31)) {
+        notify(saveprefs());
+        return;
     }
     if (active == PAINT && b >= 205 && b < 239) {
         if (a >= 0 && a < 192)
             ink = a / 32;
+        if (a >= 208 && a < 304)
+            notify(home_save("canvas", paint, sizeof paint)
+                       ? "Canvas saved."
+                       : "Canvas not saved: check writable Home.");
         if (a >= 315 && a < 429)
             wall = 2;
     }
@@ -1011,6 +988,10 @@ static const char upper[] =
     "\0\0"
     "!@#$%^&*()_+\b\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 ";
 void key(int k, int down) {
+    if (k == 29 || k == 285) {
+        ctrl = down;
+        return;
+    }
     if (k == 42 || k == 54) {
         shift = down;
         return;
@@ -1018,6 +999,27 @@ void key(int k, int down) {
     if (!down)
         return;
     dirty = 1;
+    if (pending_doc[0]) {
+        if (k == 1 || k == 28)
+            discard_choice(0);
+        else if (k == 32)
+            discard_choice(1);
+        return;
+    }
+    if (savebox) {
+        char c = k < (int)sizeof plain ? plain[k] : 0;
+        if (k == 1)
+            savebox = 0;
+        else if (k == 28)
+            write_document(savename);
+        else if (c == '\b') {
+            int n = len(savename);
+            if (n)
+                savename[n - 1] = 0;
+        } else if (c >= 32)
+            append(savename, sizeof savename, c);
+        return;
+    }
     if (setup) {
         if (k == 1 || k == 28)
             setup = 0;
@@ -1142,11 +1144,23 @@ void key(int k, int down) {
         return;
     }
     if (active == WRITER) {
-        if (c == '\b') {
-            if (len(note))
-                note[len(note) - 1] = 0;
-        } else if (c == '\n' || c >= 32)
-            append(note, sizeof note, c);
+        writer_key(k, c);
+        return;
+    }
+    if (active == FILES) {
+        int n = filecount();
+        if (k == 15) {
+            filetab = !filetab;
+            file_refresh();
+            fileidx = 0;
+        } else if (n) {
+            if (k == 328 || k == 336)
+                fileidx = clamp(fileidx + (k == 328 ? -1 : 1), 0, n - 1);
+            if (k == 28)
+                open_file(selection());
+            if (c == 'c' && suffix(selection(), ".exe"))
+                convert_file(selection());
+        }
         return;
     }
     if (active == CALC) {
@@ -1202,6 +1216,10 @@ void main(void) {
     for (;;) {
         poll();
         u32 now = ticks;
+        if (feedback[0] && (int)(now - feedback_until) >= 0) {
+            feedback[0] = 0;
+            dirty = 1;
+        }
         if (quiet && (int)(now - quiet) >= 0) {
             silence();
             quiet = 0;

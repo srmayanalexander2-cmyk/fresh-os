@@ -1,27 +1,30 @@
-# Local verification · 2026-11-20
+# FreshOS 1.1 verification · 2026-11-20
 
-The downloadable editions were built from this checkout with GCC 12 / binutils 2.40, Pillow 13.0.0 and pycdlib 1.22.0. Use **Python 3.11+** for the pinned host dependencies. Release `.sha256` files apply to the **uncompressed ISOs**. Each image contains a copy of the build-time README; its earlier Python minimum is superseded by this requirement.
+These results refer to the four **1.1** ISO archives in `releases/`. Older release evidence is available in the `v1.0.0` tag. No test below ran inside VMware Workstation or on bare metal.
 
-| Image | QEMU i386 BIOS, 32 MiB | QEMU x64 OVMF, 96 MiB |
-|---|---|---|
-| Normal | Passed | Passed, including install, note/profile persistence and disk-only reboot |
-| Lite | Passed | Passed |
-| VMware edition ISO | Passed | Passed |
+| Check on final media | Result |
+|---|---|
+| Normal, Lite, VMware, VMware Lite | Each booted in QEMU with 32 MiB BIOS and 96 MiB x64 OVMF. Each opened Files, minimized/restored it, switched desktops, automatically linked and ran PE32/64 EXEs, explicitly generated and launched both IMPs, and launched Calculator. |
+| VMware Lite install + reboot | On **both firmware paths**, installed to a marked raw IDE target, saved a Writer document and profile, and compared Home contents outside the guest. Imported an external EXE and IMP. Replaced `guest.imp` (64-bit) by converting `guest.exe` (32-bit) on the installed OS, then rebooted without the CD and executed `guest.imp` as a 32-bit IMP. That name is not a built-in. |
+| Actual ZIP's VMware Lite target | Matched VMX ISO name and 32 MiB memory setting. Extracted a copy of the included VMDK, used it directly as QEMU's IDE target, installed, booted that VMDK without the CD, converted and ran an IMP. This tests the disk, **not** the VMware hypervisor. |
+| Mouse and editor | `tests/desktop.py` sent relative PS/2 motion and button packets: clicked through Welcome → Files → select EXE → Convert → Open → Writer; edited at the caret, used Save as, and independently checked the document and linked file on the disk. |
+| Host linker/VM | `python tests/test_compat.py -v`: PE and linked IMP results match for x86 and x64 assembler samples, compiler-generated arithmetic, and compiler-generated CRT calls. Tested unsupported imports, execution budget, corrupted checksums, headers, lengths, page flags, record size and non-executable entry. |
+| Image and preview | `tools/check.py` verified hybrid partitions, BIOS and EFI boot structures and all four embedded program payloads in both kernels. Browser preview booted the Normal optical payload in Chromium/v86 and opened the launcher. |
 
-These were software-emulated boots in QEMU 11.0.2, not structural checks alone. Each smoke run sent keyboard scancodes to enter the desktop, launch Files, minimize it, restore it with the Windows key, switch to CLI mode and launch the sample Android Activity and Calculator. Serial markers came from the executing guest. The install test used a newly created raw target. It checked the saved Writer bytes with an independent host reader and launched an app after booting the installed disk with the CD removed.
+## Framebuffer captures
 
-The BIOS code path was also exercised in v86. The optional browser preview is a test machine, not an HTML implementation of the desktop: it boots the optical portion of the same Normal release, with the blank trailing Home partition omitted. Its emulator (`v86` 0.5.473) and SeaBIOS/VGA BIOS are host-side test equipment, not bundled OS dependencies. Preview controls supply key events for hosts that capture function keys.
+These are QEMU screenshots of VMware Lite at runtime, not design mockups or assets used by the OS. Reproduce with `QEMU_BIN=qemu-system-x86_64 python tests/desktop.py out/FreshOS-VMware-Lite.iso --screenshots /tmp/fresh-screens`.
 
-The growable `.vmdk` was recognized by `qemu-img` as a monolithic sparse 8,000,000,000-byte disk. No claim of testing on VMware Workstation, bare metal or Secure Boot hardware. Local smoke tests do not imply universal compatibility, pixel-perfect reference matching, or security certification.
+[Welcome](screens/welcome.jpg) · [Files: EXE selected](screens/files.jpg) · [Output from linked IMP](screens/program.jpg) · [Writer](screens/writer.jpg)
 
-The preview itself was also booted in headless Chromium. Automated input sent Enter and F1 and captured the live launcher framebuffer, including the runtime clock and app icons.
+## Reproduce the install test
 
-## Release 1 · compatibility and install regression checks
+```sh
+python tools/build.py VMware-Lite
+python tools/check.py out/FreshOS-VMware-Lite.iso
+python tools/smoke.py out/FreshOS-VMware-Lite.iso --install
+python tools/smoke.py out/FreshOS-VMware-Lite.iso --uefi --install
+python tools/package.py VMware-Lite
+```
 
-The final `v1.0.0` media passed both BIOS and UEFI package-launch smoke tests for Normal, Lite and VMware edition. Each guest opened `base.apk`, `hello32.exe` and `hello64.exe`. Normal additionally passed installation and a disk-only reboot on **both** firmware paths: the host imported a whole APK and PE32 file into the detached target, compared the stored bytes, then the guest opened both imported files.
-
-During testing under concurrent host I/O, the old installer polling loop timed out. R1 waits for the expected ATA data-request state using a PIT-clock deadline rather than a CPU-speed-dependent spin count, and logs which read/write/verification phase failed. The subsequent install checks passed. All three final ZIP64 members were decompressed and their ISO SHA-256 values matched `releases/*.sha256`.
-
-Six host-side compatibility tests cover the Win32/Win64 samples, compiler-generated arithmetic and CRT programs, a missing import, instruction budget exhaustion, stored and DEFLATE APK members, manifest-based class selection, and rejected invalid archives. These checks are not evidence that arbitrary APKs or Windows EXEs run.
-
-The sandbox's connection to GitHub's release-asset upload host closed during upload. The exact three tested ZIP64 downloads are consequently included in the R1 tag under `releases/`, with direct download links on the release page. The release-event workflow can mirror these identical bytes to the standard Assets panel after checksum verification; no independent rebuild is substituted.
+`QEMU_BIN`, `OVMF_CODE` and `OVMF_VARS` select locally installed test tools. Tests operate on temporary disks. The `.sha256` beside each archive is for the **expanded ISO**, not the ZIP. All releases reserve an 8 GB Home-capable disk image; that is not the size of the kernel.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Exchange documents with an OFFLINE FreshOS raw disk image (never a device)."""
 
-import io
-import argparse, os, re, struct, zipfile
+import zlib
+import argparse, os, re, struct
 from pathlib import Path
 
 HOME = 32768
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     p.add_argument("image", type=Path)
     sub = p.add_subparsers(dest="op", required=True)
     sub.add_parser("ls")
-    for op in ["put", "put-apk", "put-exe", "get"]:
+    for op in ["put", "put-imp", "put-exe", "get"]:
         q = sub.add_parser(op)
         q.add_argument("name")
         q.add_argument("file", type=Path)
@@ -142,14 +142,23 @@ if __name__ == "__main__":
         else:
             if a.name in ("profile", "canvas"):
                 p.error("reserved system record")
-            limit = (2 << 20) if a.op in ("put-apk", "put-exe") else MAX
+            limit = (2 << 20) if a.op in ("put-imp", "put-exe") else MAX
+            if a.op == "put-imp":
+                limit += 2080
             if a.file.stat().st_size > limit:
                 p.error(f"File exceeds {limit} bytes")
             data = a.file.read_bytes()
-            if a.op == "put-apk":
-                with zipfile.ZipFile(io.BytesIO(data)) as z:
-                    if not {"classes.dex", "AndroidManifest.xml"} <= set(z.namelist()):
-                        p.error("Standalone APK required")
+            if a.op == "put-imp":
+                if (
+                    not a.name.endswith(".imp")
+                    or len(data) < 32
+                    or data[:4] != b"FIMP"
+                    or data[4:8] not in [bytes([1, b, 1, 32]) for b in (32, 64)]
+                    or struct.unpack_from("<I", data, 8)[0] != len(data)
+                    or zlib.crc32(data[:28] + bytes(4) + data[32:])
+                    != struct.unpack_from("<I", data, 28)[0]
+                ):
+                    p.error("Valid IMP1 header, checksum and .imp destination required")
             if a.op == "put-exe" and not data.startswith(b"MZ"):
                 p.error("A Windows PE executable is required")
             h.put(a.name, data)

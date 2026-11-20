@@ -2,6 +2,7 @@
 
 import struct, subprocess
 from pathlib import Path
+from editions import lite
 from art import ROOT
 
 
@@ -72,8 +73,6 @@ def efi(build, edition):
         ROOT / "kernel/shell.c",
         ROOT / "kernel/storage.c",
         ROOT / "kernel/memory.c",
-        ROOT / "kernel/android.c",
-        ROOT / "kernel/apk.c",
         ROOT / "kernel/pe.c",
         build / "art.S",
     ]:
@@ -97,7 +96,7 @@ def efi(build, edition):
             "-fshort-wchar",
             "-DEFI",
             f'-DEDITION="{edition}"',
-            f'-DLITE={int(edition=="Lite")}',
+            f"-DLITE={int(lite(edition))}",
             "-I.",
             f"-I{ROOT}/kernel",
             "-c",

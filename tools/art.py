@@ -27,14 +27,8 @@ def bake(build, lite, wallpaper=None):
         blob.extend(a.tobytes())
 
     size = (640, 360) if lite else (960, 540)
-    for name, path in [
-        ("SKY", wallpaper or ROOT / "assets/desktop.jpg"),
-        ("WELCOME", ROOT / "assets/welcome.jpg"),
-    ]:
-        asset(
-            name, ImageOps.fit(Image.open(path), size, method=Image.Resampling.LANCZOS)
-        )
-    asset("RAIL", Image.open(ROOT / "assets/rail.png"))
+    with Image.open(wallpaper or ROOT / "assets/sky.webp") as photo:
+        asset("SKY", ImageOps.fit(photo, size, method=Image.Resampling.LANCZOS))
     # Sawtooth launcher bubbles, sampled once instead of computing trig every frame.
     im = Image.new("RGB", (236, 236), (255, 0, 255))
     px = im.load()
@@ -61,6 +55,7 @@ def bake(build, lite, wallpaper=None):
         ("small", 11, False),
         ("body", 15, False),
         ("head", 23, True),
+        ("display", 46, True),
     ]:
         font = ImageFont.truetype("DejaVuSans" + ("-Bold" if bold else "") + ".ttf", sz)
         w = sz + 4

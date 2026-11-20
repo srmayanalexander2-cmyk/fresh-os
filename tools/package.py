@@ -3,6 +3,7 @@
 import argparse, hashlib, zipfile
 from pathlib import Path
 from check import verify
+from editions import EDITIONS, vmware
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,12 +28,12 @@ def pack(edition):
         z.write(ROOT / "README.md", "README.txt")
         z.write(ROOT / "docs/coverage.md", "FEATURES.txt")
         z.write(ROOT / "docs/licenses/DejaVu.txt", "FONT-LICENSE.txt")
-        z.write(ROOT / "docs/release-1.md", "RELEASE-1.txt")
-        for name in ("base.apk", "hello32.exe", "hello64.exe"):
+        z.write(ROOT / "docs/imp.md", "IMP-FORMAT.txt")
+        for name in ("hello32.imp", "hello64.imp", "hello32.exe", "hello64.exe"):
             z.write(ROOT / "build" / edition / name, "examples/" + name)
-        if edition == "VMware":
+        if vmware(edition):
             for name in ["FreshOS.vmx", "FreshTarget.vmdk"]:
-                z.write(ROOT / "out" / name, name)
+                z.write(ROOT / "build" / edition / "vm" / name, name)
     temp.replace(path)
     (out / f"FreshOS-{edition}.sha256").write_text(check)
     print(
@@ -43,7 +44,7 @@ def pack(edition):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("edition", choices=["Normal", "Lite", "VMware", "all"])
+    p.add_argument("edition", choices=(*EDITIONS, "all"))
     e = p.parse_args().edition
-    for edition in ["Normal", "Lite", "VMware"] if e == "all" else [e]:
+    for edition in EDITIONS if e == "all" else [e]:
         pack(edition)

@@ -1,6 +1,6 @@
-# FreshOS Release 1 · Sky live edition
+# FreshOS 1.1 · Native sky desktop
 
-A native, experimental x86 desktop built for the supplied cloud-and-glass design. The loaders, kernel, framebuffer renderer, input drivers, shell, app sessions, installer, Fresh Home filesystem and small DEX interpreter are written here. **It is not a Linux image, a browser kiosk, or a Windows distribution.** The OS does not require the internet to start.
+A native, experimental x86 desktop built for the supplied cloud-and-glass design. The loaders, kernel, framebuffer renderer, input drivers, shell, app sessions, installer, Fresh Home filesystem and IMP linker and bounded x86 interpreter are written here. **It is not a Linux image, a browser kiosk, or a Windows distribution.** The OS does not require the internet to start.
 
 ## 1 · Get the actual image
 
@@ -8,11 +8,12 @@ Extract **one** ZIP64 archive. Each contains a bootable `.iso`, exactly **8,000,
 
 | Edition | Package | Difference |
 |---|---|---|
-| Normal | [FreshOS-Normal.zip](https://github.com/srmayanalexander2-cmyk/fresh-os/releases/download/v1.0.0/FreshOS-Normal.zip) | Full-resolution native artwork and spring transitions. |
-| Lite | [FreshOS-Lite.zip](https://github.com/srmayanalexander2-cmyk/fresh-os/releases/download/v1.0.0/FreshOS-Lite.zip) | Smaller 640×360 wallpaper and welcome assets, animations initially off. Same applications. |
-| VMware | [FreshOS-VMware.zip](https://github.com/srmayanalexander2-cmyk/fresh-os/releases/download/v1.0.0/FreshOS-VMware.zip) | ISO plus a configured `.vmx` and growable `.vmdk` prepared for installation. Extract together and **open `FreshOS.vmx`** on an x86 VMware host. |
+| Normal | [FreshOS-Normal.zip](releases/FreshOS-Normal.zip) | Full-resolution native artwork and spring transitions. |
+| Lite | [FreshOS-Lite.zip](releases/FreshOS-Lite.zip) | Smaller 640×360 sky photograph, animations initially off. Same applications. |
+| VMware | [FreshOS-VMware.zip](releases/FreshOS-VMware.zip) | ISO plus a configured `.vmx` and growable `.vmdk` prepared for installation. Extract together and **open `FreshOS.vmx`** on an x86 VMware host. |
+| VMware Lite | [FreshOS-VMware-Lite.zip](releases/FreshOS-VMware-Lite.zip) | Lite graphics, motion initially off, **32 MiB** BIOS VM profile. ISO, VMX and growable IDE target are supplied together. |
 
-**What occupies the space:** the native BIOS payload is about 2.5 MB (less for Lite); the hybrid image also carries an 8 MiB FAT16 EFI system partition. At byte 16,777,216 begins the writable **Fresh Home** partition. Its initially empty space is why the downloads compress well. This is 8 GB of *disk capacity*, not 8 GB of implemented software. An optical drive is read-only; user data needs a writable, supported disk. The compact developer build omits Home and cannot be installed with the native installer.
+**What occupies the space:** the native BIOS payload is under 3 MB; the hybrid image also carries an 8 MiB FAT16 EFI system partition. At byte 16,777,216 begins the writable **Fresh Home** partition. Its initially empty space is why the downloads compress well. This is 8 GB of *disk capacity*, not 8 GB of implemented software. An optical drive is read-only; user data needs a writable, supported disk. The compact developer build omits Home and cannot be installed with the native installer.
 
 ## 2 · Boot or install
 
@@ -32,12 +33,12 @@ qemu-system-x86_64 -m 96 -drive file=fresh-target.img,format=raw,if=ide,index=0 
 
 ## 3 · Use the desktop
 
-The welcome scene uses the supplied art. The desktop, clock, bubbles, launcher, windows, controls and applications are rendered by the kernel. The rail opens **Files**, not a pretend Chrome browser. The desktop starts in GUI mode. Settings offers GUI/CLI, wallpaper, shell text colors, motion, software brightness and PC-speaker feedback. Click a value or use keys **1–6** in Settings. Paint can turn your own drawing into the wallpaper; the builder also accepts a photograph.
+Only the sky photograph is used as wallpaper. Both welcome buttons, the glass card and the dock are drawn by the kernel. The desktop, clock, bubbles, launcher, windows, controls and applications are rendered by the kernel. The rail opens **Files**, not a pretend Chrome browser. The desktop starts in GUI mode. Settings offers GUI/CLI, wallpaper, shell text colors, motion, software brightness and PC-speaker feedback. Click a value or use keys **1–6** in Settings. Paint can turn your own drawing into the wallpaper; the builder also accepts a photograph.
 
 | Control | Action |
 |---|---|
 | Enter | Enter live session; select focused launcher or tray item |
-| F1 / glossy left arrow | All Apps in GUI; text Start in CLI. Arrows / Tab to navigate. Click More for page two. |
+| F1 / Apps on the rail | All Apps in GUI; text Start in CLI. Arrows / Tab to navigate. Click More for page two. |
 | Windows key / F2 | Minimized apps; Up/Down and Enter restore. F2 works when the host intercepts Win. |
 | F3 | Switch between the graphical desktop and command-line desktop |
 | F4 / Esc / window `_` | Minimize without losing state. `x` closes the session. Drag the title bar to move a window. |
@@ -45,11 +46,11 @@ The welcome scene uses the supplied art. The desktop, clock, bubbles, launcher, 
 
 **Command-line desktop:** no desktop cursor; the cursor returns inside graphical apps. `start` lists runnable apps as text and leaves the prompt active. Type an app name, or `open NAME`. Prefixes show matching apps; Tab completes a name, Up recalls the last command. Try `start`, `writer`, F4, `tasks`, `resume writer`, `wall lagoon`, `color ice`, `time`, `gui` or `help`.
 
-**Apps:** Files (workspace shortcuts), Writer (plain-text scratchpad), Paint, Calculator (integer arithmetic), hardware Clock, Settings, Terminal, playable Minefield, System information, Android Activity viewer, month Calendar, Tasks and EXE Runner. These are built-in sessions in one address space, not isolated preemptive user processes.
+**Apps:** Files (select/open, Library/Recent, EXE conversion), Writer (plain-text editor), Paint, Calculator (integer arithmetic), hardware Clock, Settings, Terminal, playable Minefield, System information, month Calendar, Tasks and Programs (IMP/EXE output). These are built-in sessions in one address space, not isolated preemptive user processes.
 
 ## 4 · Keep files and preferences
 
-Without a writable **primary IDE Fresh Home disk**, everything is temporary. On a mounted Home disk, write in Writer, minimize, then type `save note.txt`. `note.txt` is restored on boot. `save draft` / `load draft` store and recall named notes, `savecanvas` persists the canvas, `prefs` persists interface settings, `ls` lists recent versions, and `storage` reports the mount status. Documents append to a checksum-protected log; two alternating superblocks commit the latest head. Old versions consume space; there is not yet a garbage collector. Writer is limited to 1,399 bytes.
+Without a writable **primary IDE Fresh Home disk**, everything is temporary. On a mounted Home disk, use **Save**, **Save as**, or Ctrl+S in Writer. Click to place the caret, or navigate with the arrow keys, Home and End. Ctrl+Shift+S opens Save as. Select Save profile in Settings to persist settings. `note.txt` is restored on boot. `save draft` / `load draft` store and recall named notes, `savecanvas` persists the canvas, `prefs` persists interface settings, `ls` lists recent versions, and `storage` reports the mount status. Documents append to a checksum-protected log; two alternating superblocks commit the latest head. Old versions consume space; there is not yet a garbage collector. Writer is limited to 1,399 bytes.
 
 The offline host tool exchanges files with a **detached raw image**, never a mounted VM disk or live device:
 
@@ -59,11 +60,11 @@ python3 tools/home.py fresh-target.img get draft exported.txt
 python3 tools/home.py fresh-target.img ls
 ```
 
-## 5 · APK and Windows EXE support
+## 5 · Link and run IMP programs
 
-Open **Files** and click `base.apk`, `hello32.exe`, or `hello64.exe`. In the command desktop use `open FILENAME`. Release 1 reads standalone APK archives inside the guest and interprets a limited TextView Activity. The new EXE Runner maps PE32/PE32+ images into private interpreted memory, implements selected Windows and CRT calls, and displays program output or an unsupported-feature diagnostic. Neither subsystem claims universal app compatibility.
+Opening an EXE automatically links it into an IMP in memory and launches it without writing to disk. To keep the linked image, open **Files**, select `hello64.exe`, click **Convert to IMP**, then click **Open** on the selected result in Recent. Or press F3, type `convert hello64.exe` and then `open hello64.imp`. With a writable Home, the generated file survives a restart. On read-only media it stays in RAM. Use Tab, the arrows, C and Enter to do the same in Files without a mouse. The ISO also includes a 32-bit EXE and both prelinked examples.
 
-See [Release 1 notes and compatibility table](docs/release-1.md) for the exact API list, limits and external package import instructions. Android example source is in `examples/android`; Windows examples are assembled and linked from `examples/windows` by the build. The three actual packages are included both inside the ISO and in the ZIP's `examples/` directory.
+[IMP1 specification and host converter](docs/imp.md) documents the executable layout, ABI, validation and known limits. Linking is **not** a way around missing Windows APIs. Android support has been removed.
 
 ## 6 · Build, verify and package
 
@@ -78,9 +79,9 @@ python3 -m venv .venv
 .venv/bin/python tools/package.py Normal
 ```
 
-**Windows Command Prompt:** after installing those WSL prerequisites, run `BUILD-ISO.cmd Normal`, `BUILD-ISO.cmd Lite`, `BUILD-ISO.cmd VMware`, or `BUILD-ISO.cmd all`. The source build writes the actual ISOs to `out\`. No build tools are needed to use the prebuilt releases.
+**Windows Command Prompt:** after installing those WSL prerequisites, run `BUILD-ISO.cmd Normal`, `BUILD-ISO.cmd Lite`, `BUILD-ISO.cmd VMware`, `BUILD-ISO.cmd VMware-Lite`, or `BUILD-ISO.cmd all`. The source build writes the actual ISOs to `out\`. No build tools are needed to use the prebuilt releases.
 
-**Actions:** run the **Build FreshOS media** workflow manually. It builds all three editions, runs the native boot/input smoke tests under QEMU with BIOS and OVMF, then uploads ZIP64 downloads. The Normal job also installs to a fresh disk, checks saved data and boots again without the ISO. See `tools/smoke.py` to run the same checks locally; use `--install` and/or `--uefi`. `QEMU_BIN`, `OVMF_CODE`, `OVMF_VARS` can override their locations.
+**Actions:** run the **Build FreshOS media** workflow manually. It builds all four editions, runs the native boot/input smoke tests under QEMU with BIOS and OVMF, then uploads ZIP64 downloads. The Normal job also installs to a fresh disk, checks saved data and boots again without the ISO. See `tools/smoke.py` to run the same checks locally; use `--install` and/or `--uefi`. `QEMU_BIN`, `OVMF_CODE`, `OVMF_VARS` can override their locations.
 
 ## 7 · Scope and provenance
 

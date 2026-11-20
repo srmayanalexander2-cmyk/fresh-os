@@ -58,7 +58,7 @@ struct Font {
     int w, h;
     const u8 *adv, *bitmap;
 };
-static const struct Font fonts[] = {small_font, body_font, head_font};
+static const struct Font fonts[] = {small_font, body_font, head_font, display_font};
 static int text(int x, int y, const char *s, int f, u32 color) {
     const struct Font *z = fonts + f;
     for (; *s; s++) {

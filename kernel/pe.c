@@ -766,11 +766,9 @@ static void step(VM *v) {
 unsupported:
     fail(v, "Unsupported x86 instruction");
 }
-int pe_run(const u8 *f, u32 n, PeResult *r) {
-    clear((u8 *)r, sizeof *r);
-    VM v = {.res = r, .budget = STEPS};
-    if (!load(&v, f, n))
-        fail(&v, "Invalid or oversized PE image");
+static int execute(VM *state) {
+    VM v = *state;
+    PeResult *r = v.res;
     if (!v.err) {
         v.r[4] = STACK + STACK_SIZE - 64;
         push(&v, RETURN);
@@ -790,4 +788,116 @@ int pe_run(const u8 *f, u32 n, PeResult *r) {
     if (!r->detail[0])
         detail(r, v.err ? v.err : "Program exited");
     return v.done && !v.err;
+}
+
+int pe_run(const u8 *f, u32 n, PeResult *r) {
+    clear((u8 *)r, sizeof *r);
+    VM v = {.res = r, .budget = STEPS};
+    if (!load(&v, f, n))
+        fail(&v, "Invalid or oversized PE image");
+    return execute(&v);
+}
+/* IMP1 is a prelinked page image. Import ordinals are frozen for ABI 1.
+ * Preserve the mapped headers for applications which inspect their own image;
+ * the IMP loader does not read or trust PE structures. See docs/imp.md. */
+static u32 imp_crc(const u8 *f, u32 n) {
+    u32 crc = ~0u;
+    for (u32 i = 0; i < n; i++) {
+        crc ^= (i >= 28 && i < 32) ? 0 : f[i];
+        for (int j = 0; j < 8; j++)
+            crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1)));
+    }
+    return ~crc;
+}
+u32 imp_convert(const u8 *f, u32 n, u8 *out, u32 cap, PeResult *r) {
+    clear((u8 *)r, sizeof *r);
+    VM v = {.res = r};
+    if (!load(&v, f, n)) {
+        if (!r->detail[0])
+            detail(r, v.err ? v.err : "Invalid or unsupported PE");
+        return 0;
+    }
+    if (cap < 32) {
+        detail(r, "Output too small");
+        return 0;
+    }
+    clear(out, 32);
+    bytes(out, (const u8 *)"FIMP", 4);
+    out[4] = 1;
+    out[5] = v.res->bits;
+    out[6] = 1;
+    out[7] = 32;
+    put(out + 12, 4, v.size);
+    put(out + 16, 8, v.base);
+    put(out + 24, 4, v.ip - v.base);
+    u32 pos = 32;
+    for (u32 off = 0; off < v.size; off += 4096) {
+        u32 size = v.size - off;
+        if (size > 4096)
+            size = 4096;
+        int flags = perm[off >> 12] & 7;
+        if (!flags)
+            size = 0;
+        while (size && image[off + size - 1] == 0)
+            size--;
+        if (!span(cap, pos, 4 + size)) {
+            detail(r, "Output too small");
+            return 0;
+        }
+        out[pos] = flags;
+        out[pos + 1] = 0;
+        put(out + pos + 2, 2, size);
+        bytes(out + pos + 4, image + off, size);
+        pos += 4 + size;
+    }
+    put(out + 8, 4, pos);
+    put(out + 28, 4, imp_crc(out, pos));
+    return pos;
+}
+static const char *imp_load(VM *v, const u8 *f, u32 n) {
+    if (n < 32 || n > IMP_LIMIT || get(f, 4) != 0x504d4946u)
+        return "Not a FreshOS IMP image";
+    if (f[4] != 1 || f[6] != 1 || f[7] != 32)
+        return "Unsupported IMP format or ABI";
+    if (f[5] != 32 && f[5] != 64)
+        return "Unsupported IMP architecture";
+    if (get(f + 8, 4) != n || imp_crc(f, n) != get(f + 28, 4))
+        return "IMP length or checksum mismatch";
+    v->res->bits = f[5];
+    v->wide = f[5] == 64;
+    v->size = get(f + 12, 4);
+    v->base = get(f + 16, 8);
+    u32 entry = get(f + 24, 4), size = v->size;
+    if (!size || size > IMAGE_MAX || entry >= size || !v->base ||
+        v->base > 0x7fffffffffffULL - size || (!v->wide && v->base > 0xffffffffu - size) ||
+        !(v->base + size <= HEAP || v->base >= HEAP + HEAP_SIZE) ||
+        !(v->base + size <= RETURN || v->base >= STACK + STACK_SIZE))
+        return "Invalid IMP address layout";
+    clear(image, size);
+    clear(perm, sizeof perm);
+    u32 pos = 32;
+    for (u32 off = 0; off < size; off += 4096) {
+        if (!span(n, pos, 4))
+            return "Truncated IMP page";
+        int flags = f[pos];
+        u32 used = get(f + pos + 2, 2);
+        if (flags > 7 || f[pos + 1] || used > 4096 || used > size - off || (!flags && used) ||
+            !span(n, pos + 4, used))
+            return "Invalid IMP page";
+        perm[off >> 12] = flags;
+        bytes(image + off, f + pos + 4, used);
+        pos += 4 + used;
+    }
+    if (pos != n || !(perm[entry >> 12] & X))
+        return "Invalid IMP entry or trailing data";
+    v->ip = v->base + entry;
+    clear(stackmem, sizeof stackmem);
+    clear(heap, sizeof heap);
+    return 0;
+}
+int imp_run(const u8 *f, u32 n, PeResult *r) {
+    clear((u8 *)r, sizeof *r);
+    VM v = {.res = r, .budget = STEPS};
+    v.err = imp_load(&v, f, n);
+    return execute(&v);
 }

@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   attach:
-    if: github.event.release.tag_name == 'v1.0.0'
+    if: github.event.release.tag_name == 'v1.1.0'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -22,12 +22,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          for edition in Normal Lite VMware; do
+          for edition in Normal Lite VMware VMware-Lite; do
             archive="releases/FreshOS-$edition.zip"
             iso="FreshOS-$edition.iso"
             expected=$(cut -d' ' -f1 "releases/FreshOS-$edition.sha256")
             actual=$(unzip -p "$archive" "$iso" | sha256sum | cut -d' ' -f1)
             test "$actual" = "$expected"
           done
-          unzip -p releases/FreshOS-Normal.zip examples/base.apk > "$RUNNER_TEMP/base.apk"
-          gh release upload v1.0.0 releases/FreshOS-{Normal,Lite,VMware}.{zip,sha256} "$RUNNER_TEMP/base.apk" --clobber
+          gh release upload v1.1.0 releases/FreshOS-{Normal,Lite,VMware,VMware-Lite}.{zip,sha256} --clobber

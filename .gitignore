@@ -3,8 +3,7 @@
 .preview/
 __pycache__/
 *.pyc
-examples/android/build/
 
-# Ignore future local packages; only the explicitly published R1 archives are tracked.
+# Ignore future local packages; only explicitly published archives are tracked.
 /releases/*.zip
 /releases/*.tmp

@@ -1,6 +1,6 @@
 """Inspect the hybrid image without reading gigabytes of unused Home space."""
 
-import argparse, io, struct, zipfile
+import argparse, io, struct
 from pathlib import Path
 import pycdlib
 from home import Home
@@ -23,14 +23,16 @@ def verify(path):
             return out.getvalue()
 
         boot = load("FRESHOS.BIN")
-        assert b"FreshOS Release 1" in load("RELEASE.TXT")
-        samples = [load(name) for name in ["BASE.APK", "HELLO32.EXE", "HELLO64.EXE"]]
-        with zipfile.ZipFile(io.BytesIO(samples[0])) as apk:
-            assert apk.testzip() is None and {
-                "classes.dex",
-                "AndroidManifest.xml",
-            } <= set(apk.namelist())
-        for sample, machine in zip(samples[1:], (0x14C, 0x8664)):
+        assert b"FreshOS IMP1" in load("RELEASE.TXT")
+        names = [name for _, _, files in iso.walk(iso_path="/") for name in files]
+        assert not any(".APK" in name for name in names)
+        samples = [
+            load(name)
+            for name in ("HELLO32.IMP", "HELLO64.IMP", "HELLO32.EXE", "HELLO64.EXE")
+        ]
+        for image, bits in zip(samples, (32, 64)):
+            assert image[:8] == b"FIMP" + bytes((1, bits, 1, 32))
+        for sample, machine in zip(samples[2:], (0x14C, 0x8664)):
             pe = struct.unpack_from("<I", sample, 60)[0]
             assert (
                 sample[pe : pe + 4] == b"PE\0\0"

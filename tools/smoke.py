@@ -36,7 +36,10 @@ class Machine:
                 "order=d",
             ]
         if disk:
-            args += ["-drive", f"file={disk},if=ide,index=0,format=raw"]
+            args += [
+                "-drive",
+                f"file={disk},if=ide,index=0,format={'vmdk' if disk.suffix=='.vmdk' else 'raw'}",
+            ]
         if uefi:
             for key, default, mode in [
                 ("OVMF_CODE", "/usr/share/OVMF/OVMF_CODE_4M.fd", "readonly=on"),
@@ -105,12 +108,15 @@ def smoke(iso, uefi, install):
             m.key("ret")
             m.wait("app: files", 2)
             m.key("f3")
-            m.type("start\nopen base.apk\n")
-            m.wait("DEX Activity rendered")
-            m.key("f4")
+            m.type("start\n")
             for bits in (32, 64):
                 m.type(f"open hello{bits}.exe\n")
-                m.wait(f"PE{bits} completed")
+                m.wait(f"EXE to IMP{bits} completed")
+                m.key("f4")
+                m.type(f"convert hello{bits}.exe\n")
+                m.wait(f"IMP linked: hello{bits}.imp")
+                m.type(f"open hello{bits}.imp\n")
+                m.wait(f"IMP{bits} completed", 2)
                 m.key("f4")
             m.type("calc\n")
             m.wait("app: calc")
@@ -124,9 +130,10 @@ def smoke(iso, uefi, install):
                 m.type("writer\n")
                 m.wait("app: writer")
                 m.type("cloud journal")
+                m.key("ctrl-s")
                 m.key("f4")
-                m.type("save note.txt\nprefs\napk demo\n")
-                m.wait("DEX Activity rendered", 2)
+                m.type("prefs\nconvert hello64.exe\n")
+                m.wait("IMP linked: hello64.imp", 2)
         if install:
             with disk.open("rb") as f:
                 h = Home(f)
@@ -138,7 +145,7 @@ def smoke(iso, uefi, install):
             cd = pycdlib.PyCdlib()
             cd.open(str(iso))
             for src, target, op in [
-                ("BASE.APK", "guest.apk", "put-apk"),
+                ("HELLO64.IMP", "guest.imp", "put-imp"),
                 ("HELLO32.EXE", "guest.exe", "put-exe"),
             ]:
                 path = folder / target
@@ -155,12 +162,25 @@ def smoke(iso, uefi, install):
                 m.key("ret")
                 m.wait("desktop ready")
                 m.type("open guest.exe\n")
-                m.wait("PE32 completed")
+                m.wait("EXE to IMP32 completed")
                 m.key("f4")
-                m.type("open guest.apk\n")
-                m.wait("DEX Activity rendered")
+                m.type("open guest.imp\n")
+                m.wait("IMP64 completed")
+                m.key("f4")
+                m.type("convert guest.exe\n")
+                m.wait("IMP linked: guest.imp")
+            with disk.open("rb") as f:
+                h = Home(f)
+                assert h.read("guest.imp")[:6] == b"FIMP\x01\x20"
+                assert h.read("hello64.imp") == (folder / "guest.imp").read_bytes()
+            with Machine(folder, None, disk, uefi) as m:
+                m.wait("welcome ready:")
+                m.key("ret")
+                m.wait("desktop ready")
+                m.type("open guest.imp\n")
+                m.wait("IMP32 completed")
         print(
-            f'PASS  {iso.name}: {"x64 UEFI" if uefi else "i386 BIOS"} boot, Windows-key tray, CLI launch, intact APK, PE32 and PE64'
+            f'PASS  {iso.name}: {"x64 UEFI" if uefi else "i386 BIOS"} boot, Windows-key tray, CLI launch, PE32/64 conversion and IMP launch'
             + (", install, persisted document and disk-only reboot" if install else "")
         )
 

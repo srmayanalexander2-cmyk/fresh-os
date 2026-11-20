@@ -17,7 +17,7 @@ for name in ("seabios.bin", "vgabios.bin"):
 shutil.copy2(a.bios_dir / "COPYING.LESSER", dst / "FIRMWARE-LICENSE")
 shutil.copy2(a.v86_build.parent / "LICENSE", dst / "V86-LICENSE")
 shutil.copy2(Path(__file__).with_name("index.html"), dst / "index.html")
-for e in ("Normal", "Lite", "VMware"):
+for e in ("Normal", "Lite", "VMware", "VMware-Lite"):
     shutil.copy2(ROOT / "releases" / f"FreshOS-{e}.zip", dst)
 with (ROOT / "out/FreshOS-Normal.iso").open("rb") as src:
     src.seek(16 * 2048 + 80)

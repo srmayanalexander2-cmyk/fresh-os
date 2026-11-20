@@ -1,7 +1,7 @@
 """Black-box tests of the same freestanding runtimes linked into both kernels."""
 
 import ctypes as c
-import io, struct, subprocess, sys, tempfile, unittest, zipfile
+import zlib, struct, subprocess, sys, tempfile, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +35,7 @@ class Compat(unittest.TestCase):
                 "-Werror",
                 "-shared",
                 "-fPIC",
-                *[ROOT / "kernel" / n for n in ["pe.c", "apk.c", "android.c"]],
+                ROOT / "kernel/pe.c",
                 "-o",
                 so,
             ],
@@ -43,11 +43,14 @@ class Compat(unittest.TestCase):
         )
         cls.lib = c.CDLL(str(so))
         cls.lib.pe_run.argtypes = [c.c_char_p, c.c_uint, c.POINTER(Result)]
-        cls.lib.apk_activity.restype = c.c_char_p
-        cls.lib.apk_activity.argtypes = [c.c_char_p, c.c_uint, c.POINTER(c.c_char_p)]
-        with zipfile.ZipFile(ROOT / "examples/Postcard.apk") as z:
-            cls.manifest = z.read("AndroidManifest.xml")
-            cls.dex = z.read("classes.dex")
+        cls.lib.imp_run.argtypes = cls.lib.pe_run.argtypes
+        cls.lib.imp_convert.argtypes = [
+            c.c_char_p,
+            c.c_uint,
+            c.c_void_p,
+            c.c_uint,
+            c.POINTER(Result),
+        ]
 
     @classmethod
     def tearDownClass(cls):
@@ -58,13 +61,19 @@ class Compat(unittest.TestCase):
         self.assertEqual(
             bool(self.lib.pe_run(bytes(data), len(data), c.byref(r))), ok, r.detail
         )
+        if ok:
+            imp = self.link(data)
+            rr = Result()
+            self.assertTrue(self.lib.imp_run(imp, len(imp), c.byref(rr)), rr.detail)
+            self.assertEqual(bytes(rr), bytes(r))
         return r
 
-    def apk(self, data, ok=True):
-        err = c.c_char_p()
-        s = self.lib.apk_activity(data, len(data), c.byref(err))
-        self.assertEqual(s is not None, ok, err.value)
-        return s if ok else err.value
+    def link(self, data):
+        r = Result()
+        out = c.create_string_buffer(2100000)
+        n = self.lib.imp_convert(bytes(data), len(data), out, len(out), c.byref(r))
+        self.assertGreater(n, 0, r.detail)
+        return out.raw[:n]
 
     def test_real_exes(self):
         for bits in (32, 64):
@@ -157,38 +166,36 @@ class Compat(unittest.TestCase):
             b"budget", self.pe(f[:code] + b"\xeb\xfe" + f[code + 2 :], False).detail
         )
 
-    def package(self, method, manifest=None, dex=None):
-        out = io.BytesIO()
-        with zipfile.ZipFile(out, "w", method) as z:
-            z.writestr(
-                "AndroidManifest.xml", self.manifest if manifest is None else manifest
-            )
-            z.writestr("classes.dex", self.dex if dex is None else dex)
-        return out.getvalue()
-
-    def test_intact_apk(self):
-        for method in [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED]:
-            self.assertIn(b"Greetings from the clouds", self.apk(self.package(method)))
-
-    def test_manifest_selects_class(self):
-        m = self.manifest.replace(
-            "os.fresh.Postcard".encode("utf-16le"),
-            "os.fresh.Absentee".encode("utf-16le"),
-        )
-        self.assertNotEqual(m, self.manifest)
-        self.assertIn(b"Launcher Activity", self.apk(self.package(0, m), False))
-
-    def test_rejection(self):
-        self.assertIn(b"directory", self.apk(self.package(0)[:-22], False))
-        self.assertIn(
-            b"checksum",
-            self.apk(
-                self.package(0).replace(b"Greetings from", b"Qreetings from"), False
-            ),
-        )
-        self.assertIn(
-            b"binary AndroidManifest", self.apk(self.package(8, b"<manifest/>"), False)
-        )
+    def test_imp_validation(self):
+        good = self.link((self.work / "hello32.exe").read_bytes())
+        for pos, value, crc in [
+            (0, 0, False),
+            (4, 2, True),
+            (5, 16, True),
+            (6, 2, True),
+            (8, 0, True),
+            (12, 0xFFFFFFFF, True),
+            (24, 0, True),
+            (28, 0, False),
+            (32, 8, True),
+            (33, 1, True),
+            (34, 65535, True),
+        ]:
+            with self.subTest(pos=pos):
+                data = bytearray(good)
+                struct.pack_into(
+                    "<"
+                    + ("I" if pos in (8, 12, 24, 28) else "H" if pos == 34 else "B"),
+                    data,
+                    pos,
+                    value,
+                )
+                if crc:
+                    data[28:32] = bytes(4)
+                    struct.pack_into("<I", data, 28, zlib.crc32(data))
+                r = Result()
+                self.assertFalse(self.lib.imp_run(bytes(data), len(data), c.byref(r)))
+                self.assertEqual(r.steps, 0)
 
 
 if __name__ == "__main__":

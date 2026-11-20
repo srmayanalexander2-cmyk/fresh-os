@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the native x86 live image. ISO data after the payload is reserved capacity."""
 
-import argparse, io, os, struct, subprocess, time, zipfile
+import argparse, io, os, struct, subprocess, time
 from unittest.mock import patch
 from pathlib import Path
 import pycdlib
@@ -10,7 +10,8 @@ from efi import efi
 from exe_examples import make as make_exes
 from vmdk import make as make_vmdk
 
-EDITIONS = ("Normal", "Lite", "VMware")
+from editions import EDITIONS, lite, vmware
+
 CAPACITY = 8_000_000_000
 
 
@@ -18,29 +19,36 @@ def run(args, cwd):
     subprocess.run([str(a) for a in args], cwd=cwd, check=True)
 
 
-def build(edition, wallpaper=None, compact=False, apk=None):
+def build(edition, wallpaper=None, compact=False):
     b = ROOT / "build" / edition
     b.mkdir(parents=True, exist_ok=True)
     out = ROOT / "out"
     out.mkdir(exist_ok=True)
-    bake(b, edition == "Lite", wallpaper)
-    package = (apk or ROOT / "examples/Postcard.apk").read_bytes()
-    if not 0 < len(package) <= 2 << 20:
-        raise ValueError("APK limit: 2 MiB")
-    with zipfile.ZipFile(io.BytesIO(package)) as z:
-        for name, limit in [
-            ("classes.dex", 1 << 20),
-            ("AndroidManifest.xml", 128 << 10),
-        ]:
-            if z.getinfo(name).file_size > limit:
-                raise ValueError(f"{name} exceeds runtime limit")
-    (b / "base.apk").write_bytes(package)
+    bake(b, lite(edition), wallpaper)
     make_exes(b)
-    payloads = {
-        "base_apk": "base.apk",
-        "hello32": "hello32.exe",
-        "hello64": "hello64.exe",
-    }
+    run(
+        [
+            "gcc",
+            "-std=c11",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I" + str(ROOT / "kernel"),
+            ROOT / "tools/imp-cli.c",
+            ROOT / "kernel/pe.c",
+            "-o",
+            "imp",
+        ],
+        b,
+    )
+    payloads = {}
+    for bits in (32, 64):
+        dest = b / f"hello{bits}.imp"
+        dest.unlink(missing_ok=True)
+        run([b / "imp", "convert", b / f"hello{bits}.exe", dest], b)
+        payloads["hello" + str(bits)] = f"hello{bits}.exe"
+        payloads["imp" + str(bits)] = dest.name
     (b / "packages.h").write_text(
         "".join(
             f"extern const u8 {sym}[];\n#define {sym.upper()}_SIZE {(b/name).stat().st_size}u\n"
@@ -79,8 +87,6 @@ def build(edition, wallpaper=None, compact=False, apk=None):
         ROOT / "kernel/shell.c",
         ROOT / "kernel/storage.c",
         ROOT / "kernel/memory.c",
-        ROOT / "kernel/android.c",
-        ROOT / "kernel/apk.c",
         ROOT / "kernel/pe.c",
         b / "art.S",
     ]:
@@ -106,7 +112,7 @@ def build(edition, wallpaper=None, compact=False, apk=None):
                 "-fno-asynchronous-unwind-tables",
                 "-I.",
                 f'-DEDITION="{edition}"',
-                f'-DLITE={int(edition=="Lite")}',
+                f"-DLITE={int(lite(edition))}",
                 "-c",
                 source,
                 "-o",
@@ -140,7 +146,7 @@ def build(edition, wallpaper=None, compact=False, apk=None):
     for name in payloads.values():
         data = (b / name).read_bytes()
         iso.add_fp(io.BytesIO(data), len(data), "/" + name.upper() + ";1")
-    release = (ROOT / "docs/release-1.md").read_bytes()
+    release = (ROOT / "docs/imp.md").read_bytes()
     iso.add_fp(io.BytesIO(release), len(release), "/RELEASE.TXT;1")
     info = (ROOT / "README.md").read_bytes()
     iso.add_fp(io.BytesIO(info), len(info), "/README.TXT;1")
@@ -187,20 +193,22 @@ def build(edition, wallpaper=None, compact=False, apk=None):
         f"{edition}: {path} ({size:,} bytes; {len(boot):,} bytes boot payload)",
         flush=True,
     )
-    if edition == "VMware":
-        make_vmdk(out / "FreshTarget.vmdk")
-        (out / "FreshOS.vmx").write_text(""" .encoding = "UTF-8"
+    if vmware(edition):
+        profile = b / "vm"
+        profile.mkdir(exist_ok=True)
+        make_vmdk(profile / "FreshTarget.vmdk")
+        (profile / "FreshOS.vmx").write_text(f""" .encoding = "UTF-8"
 config.version = "8"
 virtualHW.version = "14"
-displayName = "FreshOS Release 1"
+displayName = "FreshOS Current - {edition}"
 guestOS = "other"
 firmware = "bios"
-memsize = "64"
+memsize = "{32 if lite(edition) else 64}"
 ide0:0.present = "TRUE"
 ide0:0.fileName = "FreshTarget.vmdk"
 ide1:0.present = "TRUE"
 ide1:0.deviceType = "cdrom-image"
-ide1:0.fileName = "FreshOS-VMware.iso"
+ide1:0.fileName = "FreshOS-{edition}.iso"
 ide1:0.startConnected = "TRUE"
 bios.bootOrder = "cdrom"
 usb.present = "FALSE"
@@ -212,7 +220,6 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("edition", choices=(*EDITIONS, "all"), default="all", nargs="?")
     p.add_argument("--wallpaper", type=Path)
-    p.add_argument("--apk", type=Path, help="APK with a supported text Activity")
     p.add_argument(
         "--compact", action="store_true", help="omit reserved media capacity"
     )
@@ -223,4 +230,4 @@ if __name__ == "__main__":
         "time.time", return_value=int(os.environ.get("SOURCE_DATE_EPOCH", 1795132800))
     ):
         for e in EDITIONS if args.edition == "all" else [args.edition]:
-            build(e, args.wallpaper, args.compact, args.apk)
+            build(e, args.wallpaper, args.compact)

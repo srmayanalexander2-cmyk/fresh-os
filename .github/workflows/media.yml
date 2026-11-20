@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        edition: [Normal, Lite, VMware]
+        edition: [Normal, Lite, VMware, VMware-Lite]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,8 +27,11 @@ jobs:
       - run: python tools/build.py ${{ matrix.edition }}
       - run: python tools/check.py out/FreshOS-${{ matrix.edition }}.iso
       - run: python tools/smoke.py out/FreshOS-${{ matrix.edition }}.iso
+      - name: Exercise graphical file conversion and Writer with mouse input
+        if: matrix.edition == 'VMware-Lite'
+        run: python tests/desktop.py out/FreshOS-VMware-Lite.iso
       - name: UEFI boot and interaction
-        run: python tools/smoke.py out/FreshOS-${{ matrix.edition }}.iso --uefi ${{ matrix.edition == 'Normal' && '--install' || '' }}
+        run: python tools/smoke.py out/FreshOS-${{ matrix.edition }}.iso --uefi ${{ (matrix.edition == 'Normal' || matrix.edition == 'VMware-Lite') && '--install' || '' }}
       - run: python tools/package.py ${{ matrix.edition }}
       - uses: actions/upload-artifact@v4
         with:
