@@ -21,7 +21,18 @@ def make(build):
         run("as", f"--{bits}", "stub.S", "-o", "stub.o")
         libs = []
         for dll, exports in [
-            ("KERNEL32", ["ExitProcess", "GetStdHandle", "WriteFile"]),
+            (
+                "KERNEL32",
+                [
+                    "ExitProcess",
+                    "GetStdHandle",
+                    "WriteFile",
+                    "CreateFileA",
+                    "CloseHandle",
+                    "GetProductInfo",
+                    "GetVersionExA",
+                ],
+            ),
             ("USER32", ["MessageBoxW"]),
         ]:
             (work / "exports.def").write_text(
@@ -67,3 +78,27 @@ def make(build):
             "hello.o",
             *libs,
         )
+
+        if bits == 32:
+            run(
+                "as",
+                "--32",
+                str(ROOT / "examples/windows/postcard32.S"),
+                "-o",
+                "postcard.o",
+            )
+            run(
+                "ld",
+                "-m",
+                mode,
+                "--no-insert-timestamp",
+                "--subsystem",
+                "console",
+                "-s",
+                "-e",
+                "_start",
+                "-o",
+                str(build / "postcard.exe"),
+                "postcard.o",
+                *libs,
+            )

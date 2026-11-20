@@ -8,8 +8,9 @@ static char savename[32], pending_doc[32];
 static int modified;
 static u32 last_click;
 static int last_file = -1;
-static const char *const library[] = {"note.txt",    "canvas",      "hello32.exe",
-                                      "hello64.exe", "hello32.imp", "hello64.imp"};
+static const char *const library[] = {"note.txt",    "canvas",       "hello32.exe",
+                                      "hello64.exe", "hello32.imp",  "hello64.imp",
+                                      "linux.elf",   "postcard.exe", "chime.wav"};
 static int suffix(const char *s, const char *ext) {
     int a = len(s), b = len(ext);
     return a >= b && eq(s + a - b, ext);
@@ -36,7 +37,9 @@ static void file_refresh(void) {
     home_list(add_recent);
     last_file = -1;
 }
-static int filecount(void) { return filetab ? nrecent : 6; }
+static int filecount(void) {
+    return filetab ? nrecent : (int)(sizeof library / sizeof *library);
+}
 static const char *selection(void) {
     return fileidx >= 0 && fileidx < filecount()
                ? (filetab ? recent[fileidx] : library[fileidx])
@@ -51,6 +54,18 @@ static int get_program(const char *name, const u8 **data) {
     *data = imported;
     if (n != -2)
         return n;
+    if (eq(name, "chime.wav")) {
+        *data = chime;
+        return CHIME_SIZE;
+    }
+    if (eq(name, "postcard.exe")) {
+        *data = postcard;
+        return POSTCARD_SIZE;
+    }
+    if (eq(name, "linux.elf")) {
+        *data = linuxdemo;
+        return LINUXDEMO_SIZE;
+    }
     if (eq(name, "hello32.exe")) {
         *data = hello32;
         return HELLO32_SIZE;
@@ -76,14 +91,26 @@ static void open_file(const char *name) {
         launch(PAINT);
         return;
     }
-    if (suffix(name, ".imp") || suffix(name, ".exe")) {
+    if (suffix(name, ".wav")) {
+        const u8 *p;
+        int n = get_program(name, &p);
+        notify(n > 0 ? pcm_wav(p, n, vol) : "Sound clip not found.");
+        return;
+    }
+    if (suffix(name, ".elf") || suffix(name, ".imp") || suffix(name, ".exe")) {
         const u8 *p;
         int n = get_program(name, &p);
         if (n <= 0) {
             notify("Could not read program. Check its name and size.");
             return;
         }
-        runprogram(p, n, suffix(name, ".imp"));
+        if (suffix(name, ".elf")) {
+            last_imp = 2;
+            pe_ran = 1;
+            pe_ok = elf_run(p, n, &pe_result);
+            serial(pe_ok ? "Linux ELF completed\r\n" : "ELF rejected\r\n");
+        } else
+            runprogram(p, n, suffix(name, ".imp"));
         launch(WINDOWS);
         return;
     }

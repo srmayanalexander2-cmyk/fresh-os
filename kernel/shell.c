@@ -6,6 +6,7 @@ static PeResult pe_result;
 static int pe_ran, pe_ok, last_imp;
 #include "util.h"
 #include "storage.h"
+#include "drivers.h"
 #ifndef EDITION
 #define EDITION "Normal"
 #endif
@@ -26,29 +27,49 @@ enum {
     CALENDAR,
     TASKMGR,
     WINDOWS,
+    CONNECTIONS,
     NAPPS
 };
 struct App {
     const char *name, *cmd, *mark;
     u32 color;
 };
-static const struct App apps[] = {
-    {"Files", "files", "F", 0xf2c443},   {"Writer", "writer", "W", 0x79badf},
-    {"Paint", "paint", "P", 0xff849e},   {"Calculator", "calc", "+", 0x83c88c},
-    {"Clock", "clock", "C", 0x52cdde},   {"Settings", "settings", "S", 0x86a6bf},
-    {"Terminal", "term", ">", 0x5684a2}, {"Minefield", "mines", "*", 0xf5a654},
-    {"System", "system", "i", 0xb698d1}, {"Calendar", "calendar", "D", 0x6fd4bd},
-    {"Tasks", "monitor", "T", 0xc2b7f1}, {"Programs", "programs", "E", 0x60afe0}};
+static const struct App apps[] = {{"Files", "files", "F", 0xf2c443},
+                                  {"Writer", "writer", "W", 0x79badf},
+                                  {"Paint", "paint", "P", 0xff849e},
+                                  {"Calculator", "calc", "+", 0x83c88c},
+                                  {"Clock", "clock", "C", 0x52cdde},
+                                  {"Settings", "settings", "S", 0x86a6bf},
+                                  {"Terminal", "term", ">", 0x5684a2},
+                                  {"Minefield", "mines", "*", 0xf5a654},
+                                  {"System", "system", "i", 0xb698d1},
+                                  {"Calendar", "calendar", "D", 0x6fd4bd},
+                                  {"Tasks", "monitor", "T", 0xc2b7f1},
+                                  {"Programs", "programs", "E", 0x60afe0},
+                                  {"Connections", "connections", "N", 0x63d5b3}};
 static int welcome = 1, active = -1, hidden[NAPPS], menu, tray, choice, cli, shutdown, widget,
            wall, color, motion = !LITE, dim = 10, vol = 5, dirty = 1;
-static int wx = 218, wy = 64, dgx, dgy, drag, shift, caps, progress, velocity, goal;
+static int wx = (W - 506) / 2, wy = (H - 311) / 2, dgx, dgy, drag, shift, caps, progress,
+           velocity, goal;
 static int setup, installing, finished;
 static int lift, lift_speed;
 static int year, month, day, hour, minute;
 static char tim[8], date[12];
 static const u32 tones[] = {0xbbffcf, 0x8defff, 0xffff96, WHITE};
-static char note[1400], line[100], history[12][105], lastcmd[100];
-static int rows;
+static char note[1400], line[100], history[96][105], lastcmd[100];
+static int rows, scroll, cmdpos, recall, ncmd;
+static char commands[16][100];
+static int hwpage = -1, hwsetup, netrow;
+static char netinfo[2][64];
+static void netline(const char *s) {
+    if (netrow < 2)
+        copy(netinfo[netrow++], s, 64);
+}
+static int modal, consent;
+static char modaltext[768];
+static void render(void);
+static void sound(void);
+extern void poll(void);
 static u32 paint[198][466];
 static int ink;
 static const u32 paints[] = {0x177996, 0x26c67e, 0xff7891, 0xf7c24a, 0x262e3d, WHITE};
@@ -57,8 +78,9 @@ static int acc, oper, fresh = 1;
 static int grid[64], seen[64], lost, won, cell, seeded;
 static u32 seed = 1;
 static void say(const char *s) {
-    if (rows == 12) {
-        for (int i = 1; i < 12; i++)
+    scroll = 0;
+    if (rows == 96) {
+        for (int i = 1; i < 96; i++)
             copy(history[i - 1], history[i], 105);
         rows--;
     }
@@ -259,7 +281,7 @@ static const char *saveprefs(void) {
     u8 prefs[] = {1, cli, wall, color, motion, dim, vol};
     return home_save("profile", prefs, sizeof prefs)
                ? "Settings saved."
-               : "Needs writable Fresh Home on primary IDE.";
+               : "Needs a writable Fresh Home disk.";
 }
 static void loadhome(void) {
     u8 p[7];
@@ -295,7 +317,52 @@ static void begin_setup(void) {
     }
     dirty = 1;
 }
+#include "radio.inc"
+static int guest_read(const char *name, void *b, u32 cap) {
+    return suffix(name, ".txt") ? home_read(name, b, cap) : -1;
+}
+static void guest_box(const char *msg) {
+    copy(modaltext, msg, sizeof modaltext);
+    modal = 1;
+    serial("Win32 modal awaiting OK\r\n");
+    render();
+    while (modal) {
+        poll();
+        cursor_present(1, 0);
+        __asm__ volatile("hlt");
+    }
+    dirty = 1;
+}
+static int guest_save(const char *name, const void *data, u32 size) {
+    if (!home_ready() || !suffix(name, ".txt"))
+        return 0;
+    copy(modaltext, "Allow this application to save a new version of ", sizeof modaltext);
+    copy(modaltext + len(modaltext), name, 32);
+    append(modaltext, sizeof modaltext, '?');
+    modal = 2;
+    consent = 0;
+    serial("Document permission required\r\n");
+    render();
+    while (modal) {
+        poll();
+        cursor_present(1, 0);
+        __asm__ volatile("hlt");
+    }
+    dirty = 1;
+    return consent && home_save(name, data, size);
+}
 static void command(void) {
+    cmdpos = 0;
+    scroll = 0;
+    if (line[0]) {
+        if (ncmd == 16) {
+            for (int i = 1; i < 16; i++)
+                copy(commands[i - 1], commands[i], 100);
+            ncmd--;
+        }
+        copy(commands[ncmd++], line, 100);
+    }
+    recall = ncmd;
     copy(lastcmd, line, sizeof lastcmd);
     char s[100];
     copy(s, line, 100);
@@ -303,6 +370,73 @@ static void command(void) {
     if (!*s)
         return;
     say(s);
+    if (eq(s, "net") || eq(s, "net dhcp")) {
+        network_cmd(eq(s, "net dhcp"), say);
+        return;
+    }
+    if (eq(s, "help keys")) {
+        say("Home/End, arrows: edit | Up/Down: history | PgUp/PgDn: scroll");
+        say("Ctrl+L: clear | Ctrl+C: discard input | F2: tray | F3: GUI/CLI");
+        return;
+    }
+    if (eq(s, "help drivers")) {
+        say("drivers - PCI function IDs and bound drivers. vmtools - guest status.");
+        say("net dhcp | net - PCnet network. wifi scan/join/ip/leave - COM2 ESP-AT.");
+        say("bt info | bt scan - Bluetooth COM3 H4. open chime.wav - PCM output.");
+        return;
+    }
+    if (eq(s, "uname") || eq(s, "ver")) {
+        say("FreshOS 1.2 / " EDITION " / native x86 kernel");
+        return;
+    }
+    if (eq(s, "dir"))
+        copy(s, "ls", sizeof s);
+    if (eq(s, "drivers") || eq(s, "lspci")) {
+        drivers_list(say);
+        return;
+    }
+    if (eq(s, "vmtools")) {
+        say(vm_guest());
+        return;
+    }
+    if (prefix(s, "wifi ") || eq(s, "wifi")) {
+        wifi_cmd(s + 4 + (s[4] != 0));
+        return;
+    }
+    if (prefix(s, "bt ") || eq(s, "bt")) {
+        bluetooth(s + 2 + (s[2] != 0));
+        return;
+    }
+    if (eq(s, "audio test")) {
+        sound();
+        say(audio_name());
+        return;
+    }
+    if (eq(s, "pwd")) {
+        say("/home");
+        return;
+    }
+    if (prefix(s, "echo ")) {
+        say(s + 5);
+        return;
+    }
+    if (prefix(s, "cat ") && !eq(s, "cat note")) {
+        char b[1025];
+        int n = guest_read(s + 4, b, 1024);
+        if (n < 0) {
+            say("Cannot read .txt document (1 KiB maximum).");
+            return;
+        }
+        b[n] = 0;
+        char *start = b;
+        for (int i = 0; i <= n; i++)
+            if (b[i] == '\n' || !b[i]) {
+                b[i] = 0;
+                say(start);
+                start = b + i + 1;
+            }
+        return;
+    }
     int opening = prefix(s, "open ");
     if (opening) {
         for (int i = 5, n = len(s); i <= n; i++)
@@ -335,6 +469,7 @@ static void command(void) {
         say("files   writer   paint   calc   clock   settings   term   mines   system");
         say("calendar   monitor   programs   /   convert NAME.exe   open NAME.imp");
     } else if (eq(s, "help")) {
+        say("help keys | help drivers | lspci | ver | pwd | dir | cat FILE.txt | echo TEXT");
         say("start / apps   open NAME   tasks   resume NAME   clear   gui   cli");
         say("wall sky|lagoon|paint   color mint|ice|sun|white   time   cat note   storage");
     } else if (eq(s, "storage")) {
@@ -398,9 +533,19 @@ static void command(void) {
     else
         say("Unknown command. Type help or start.");
 }
+static void sky(void) {
+#ifdef SKY24
+    const u8 *p = SKY24;
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++, p += 3)
+            screen[y][x] = p[0] | p[1] << 8 | p[2] << 16;
+#else
+    sprite(SKY, SKY_W, SKY_H, 0, 0, W, H, 0);
+#endif
+}
 static void bg(void) {
     if (wall == 0)
-        sprite(SKY, SKY_W, SKY_H, 0, 0, W, H, 0);
+        sky();
     else if (wall == 1) {
         for (int y = 0; y < H; y++)
             box(0, y, W, 1, mix(0x055872, 0xa7efd9, y * 256 / H));
@@ -412,6 +557,10 @@ static void bg(void) {
 static void icon(int x, int y, int i, int r) {
     static const u16 *const glyphs[] = {ICON0, ICON1, ICON2, ICON3,  ICON4,  ICON5,
                                         ICON6, ICON7, ICON8, ICON10, ICON11, ICON9};
+    if (i == CONNECTIONS) {
+        sprite(GL_NETWORK, GL_NETWORK_W, GL_NETWORK_H, x, y, r, r, 1);
+        return;
+    }
     sprite(glyphs[i], 64, 64, x, y, r, r, 1);
 }
 #include "desktop.inc"
@@ -462,16 +611,28 @@ static void traybox(void) {
 static void console(int x, int y, int w, int h, int full) {
     gel(x, y, w, h, 12, 0x164556, 0x103e50, 0x123c4a);
     text(x + 16, y + 12, "FRESH SHELL    /    LIVE SESSION", 0, 0x8defff);
-    int max = full ? 12 : 8, start = rows > max ? rows - max : 0;
-    for (int i = start; i < rows; i++) {
+    int max = full ? 12 : 8, stop = rows - clamp(scroll, 0, rows > max ? rows - max : 0),
+        start = stop > max ? stop - max : 0;
+    for (int i = start; i < stop; i++) {
         char b[105];
         copy(b, history[i], full ? 102 : 58);
         text(x + 16, y + 36 + (i - start) * 19, b, 0, tones[color]);
     }
-    int yy = y + 39 + (rows - start) * 19;
+    int yy = y + 39 + (stop - start) * 19;
     text(x + 16, yy, "fresh >", 1, tones[color]);
-    int off = len(line) > (full ? 78 : 43) ? len(line) - (full ? 78 : 43) : 0;
-    int end = text(x + 78, yy, line + off, 1, WHITE);
+    int cp = clamp(cmdpos, 0, len(line)),
+        off = cp > (full ? 75 : 40) ? cp - (full ? 75 : 40) : 0;
+    char view[100];
+    copy(view, line + off, full ? 83 : 46);
+    int end = x + 78;
+    if (secret) {
+        for (int i = 0; i < len(pass); i++)
+            end = text(end, yy, "*", 1, WHITE);
+    } else {
+        text(end, yy, view, 1, WHITE);
+        view[clamp(cp - off, 0, 99)] = 0;
+        end += tw(view, 1);
+    }
     box(end + 1, yy + 3, 2, 15, tones[color]);
     const char *query = prefix(line, "open ") ? line + 5 : line;
     if (*query) {
@@ -565,7 +726,11 @@ static void window(void) {
     pill(x + 450, y + 3, 41, 21, "x", 0);
     int xx = x + 19, yy = y + 45;
     if (a == WINDOWS) {
-        text(xx, yy, last_imp ? "IMP application" : "Windows EXE  /  linked as IMP", 2, INK);
+        text(xx, yy,
+             last_imp == 2 ? "Linux application"
+             : last_imp    ? "IMP application"
+                           : "Windows EXE  /  linked as IMP",
+             2, INK);
         text(xx, yy + 39,
              pe_result.bits == 64 ? "INTERPRETED    /    x86-64" : "INTERPRETED    /    x86",
              0, 0x347e65);
@@ -598,7 +763,38 @@ static void window(void) {
         console(x + 9, y + 36, 488, 265, 0);
     if (a == SETTINGS)
         settings(xx, yy);
-    if (a == SYSTEM) {
+    if (a == CONNECTIONS) {
+        text(xx, yy, "Connections", 2, INK);
+        netrow = 0;
+        network_cmd(0, netline);
+        for (int i = 0; i < netrow; i++)
+            text(xx, yy + 40 + 17 * i, netinfo[i], 0, INK);
+        pill(xx + 320, yy + 35, 135, 30, "Request DHCP", 0);
+        text(xx, yy + 86, "Wi-Fi  /  ESP-AT radio", 1, INK);
+        pill(xx + 230, yy + 80, 106, 30, "Scan", 0);
+        pill(xx + 350, yy + 80, 105, 30, "Join...", 0);
+        text(xx, yy + 130, "Bluetooth  /  H4 radio", 1, INK);
+        pill(xx + 230, yy + 125, 106, 30, "Controller", 0);
+        pill(xx + 350, yy + 125, 105, 30, "Discover", 0);
+        text(xx, yy + 174, "Activity   /   Full results in Terminal", 0, INK);
+        for (int i = 0; i < 3; i++) {
+            int j = rows - 3 + i;
+            if (j >= 0) {
+                char t[65];
+                copy(t, history[j], sizeof t);
+                text(xx, yy + 197 + i * 16, t, 0, INK);
+            }
+        }
+    }
+    if (a == SYSTEM && hwpage >= 0) {
+        text(xx, yy, "Detected PCI devices", 2, INK);
+        for (int i = 0; i < 8; i++)
+            text(xx, yy + 44 + i * 19, driver_at(hwpage * 8 + i), 0, INK);
+        pill(xx, yy + 210, 90, 30, "Back", 0);
+        pill(xx + 267, yy + 210, 90, 30, "Prev", 0);
+        pill(xx + 365, yy + 210, 90, 30, "Next", 0);
+    }
+    if (a == SYSTEM && hwpage < 0) {
         text(xx, yy, "FreshOS Current", 2, INK);
         text(xx, yy + 36, EDITION " edition   /   native live kernel", 1, INK);
         text(xx, yy + 72,
@@ -609,10 +805,12 @@ static void window(void) {
 #endif
              ,
              1, INK);
-        text(xx, yy + 99, "Input: i8042 keyboard and relative PS/2 mouse", 1, INK);
+        text(xx, yy + 99, display_driver(), 1, INK);
         text(xx, yy + 126, disk_status(), 1, INK);
+        text(xx, yy + 151, audio_name(), 0, INK);
+        pill(xx + 308, yy + 208, 148, 30, "Device inventory", 0);
         text(xx, yy + 172, "F1  Launcher     F2 / Win  Tray     F3  GUI / CLI", 1, INK);
-        text(xx, yy + 198, "F4  Minimize     Esc  Back     F6 / F7  Sound / Light", 1, INK);
+        text(xx, yy + 210, vm_guest(), 0, INK);
     }
     if (a == FILES)
         files_draw(xx, yy);
@@ -672,6 +870,7 @@ static void window(void) {
     }
 }
 static void render(void) {
+    nhover = 0;
     if (welcome) {
         welcome_view();
     } else {
@@ -679,7 +878,7 @@ static void render(void) {
         if (!cli)
             rail();
         else
-            console(68, 53, 824, 401, 1);
+            console((W - 916) / 2, (H - 456) / 2, 916, 456, 1);
         if (active >= 0)
             window();
         if (progress && !cli)
@@ -699,16 +898,8 @@ static void render(void) {
             } else
                 traybox();
         }
-        if (widget) {
-            bubble(508, 420, 132, 66, 0xfff53e);
-            text(524, 429, widget == 1 ? "Volume" : "Brightness", 1, INK);
-            gel(520, 451, 105, 21, 10, WHITE, 0x19cff4, 0xdcfbff);
-            int level = widget == 1 ? vol : dim;
-            if (level)
-                gel(520, 451, level * 10, 21, 9, WHITE, 0x65f700, 0xccff9c);
-            gel(481, 491, 63, 61, 28, WHITE, 0xffee20, 0xfff472);
-            text(499, 502, ":)", 2, INK);
-        }
+        if (widget)
+            slider_draw();
         if (shutdown) {
             gel(295, 195, 370, 136, 20, WHITE, 0xbefff0, 0xf7ffff);
             text(315, 210, "End live session?", 2, INK);
@@ -730,9 +921,10 @@ static void render(void) {
         text(222, 168, finished ? "FreshOS setup result" : "Install FreshOS", 2, INK);
         text(222, 212, disk_status(), 1, INK);
         text(222, 252, "Source: FreshOS CD (secondary IDE master)", 1, INK);
-        text(222, 280, "Destination: specially prepared primary IDE disk only.", 1, INK);
+        text(222, 280, "Destination: marked IDE, SATA or virtio disk only.", 1, INK);
         text(222, 311, "Never formats or migrates an existing Windows drive.", 0, INK);
         badge(225, 341, "Back / Esc", 0);
+        badge(410, 341, "Drivers / D", 0);
         if (!finished)
             badge(611, 341, "Install / I", 1);
     }
@@ -761,10 +953,17 @@ static void render(void) {
             for (int i = 0; i < W; i++)
                 screen[j][i] = mix(0, screen[j][i], k);
     }
-    if (welcome || setup || !cli || active >= 0) {
-        gel(mx - 4, my - 4, 10, 10, 5, WHITE, 0x00c2e8, 0xc0ffff);
+    if (modal) {
+        int x = W / 2 - 220, y = H / 2 - 90;
+        glass(x, y, 440, 183, 22, 0xdefff2, 250);
+        text(x + 20, y + 13, "Windows application", 2, INK);
+        wrapped(x + 20, y + 52, 397, modaltext);
+        if (modal == 2)
+            pill(x + 180, y + 139, 110, 30, "Deny", 0);
+        pill(x + 304, y + 139, 110, 30, modal == 2 ? "Allow / Y" : "OK", 1);
     }
     present();
+    cursor_present(modal || welcome || setup || !cli || active >= 0, 1);
 }
 static void sound(void);
 static void setting(int i) {
@@ -794,12 +993,30 @@ static int inside(int x, int y, int a, int b, int w, int h) {
     return x >= a && x < a + w && y >= b && y < b + h;
 }
 void pointer(int old, int x, int y) {
-    if (cli && active < 0 && !setup && !welcome && !pending_doc[0])
+    if (cli && active < 0 && !setup && !welcome && !pending_doc[0] && !modal)
         return;
+    if (secret)
+        return;
+    static int prevdock = -2;
+    int current = (dock_at(x, y) + 1) * 64 + hovered(x, y);
+    if (!(buttons & 1) && !(old & 1) && prevdock == current) {
+        return;
+    }
+    prevdock = current;
     dirty = 1;
     int click = (buttons & 1) && !(old & 1);
     if (!(buttons & 1))
         drag = 0;
+    if (modal) {
+        if (click && inside(x, y, W / 2 + 84, H / 2 + 49, 110, 30)) {
+            consent = 1;
+            modal = 0;
+        } else if (modal == 2 && click && inside(x, y, W / 2 - 40, H / 2 + 49, 110, 30)) {
+            consent = 0;
+            modal = 0;
+        }
+        return;
+    }
     if (pending_doc[0]) {
         if (click && inside(x, y, 345, 299, 112, 30))
             discard_choice(0);
@@ -815,6 +1032,14 @@ void pointer(int old, int x, int y) {
         return;
     }
     if (setup) {
+        if (click && inside(x, y, 410, 341, 114, 31)) {
+            setup = 0;
+            welcome = 0;
+            hwsetup = 1;
+            hwpage = 0;
+            launch(SYSTEM);
+            return;
+        }
         if (click && inside(x, y, 225, 341, 114, 31))
             setup = 0;
         else if (click && !finished && inside(x, y, 611, 341, 114, 31))
@@ -822,9 +1047,9 @@ void pointer(int old, int x, int y) {
         return;
     }
     if (welcome) {
-        if (click && inside(x, y, 418, 389, 150, 32))
+        if (click && inside(x, y, START_X + 17, START_Y + 57, 174, 32))
             open_setup();
-        else if (click && inside(x, y, 395, 329, 196, 43))
+        else if (click && inside(x, y, START_X, START_Y, 208, 42))
             enter();
         return;
     }
@@ -841,17 +1066,25 @@ void pointer(int old, int x, int y) {
         wy = clamp(y - dgy, 0, H - 320);
         return;
     }
-    if (widget && click) {
-        if (inside(x, y, 516, 447, 119, 32)) {
-            int v = clamp((x - 520 + 5) / 10, 0, 10);
-            if (widget == 1) {
-                vol = v;
-                sound();
-            } else
-                dim = clamp(v, 1, 10);
+    if (widget) {
+        int yy = slider_y();
+        if (click && inside(x, y, SL_X - 12, yy - 12, SL_LEN + 24, 33))
+            slide_grab = 1;
+        if (slide_grab) {
+            int level = clamp((x - SL_X + 9) / 18, 0, 10);
+            if (widget == 1)
+                vol = level;
+            else
+                dim = clamp(level, 1, 10);
+            if (!(buttons & 1)) {
+                slide_grab = 0;
+                if (widget == 1)
+                    sound();
+            }
             return;
         }
-        widget = 0;
+        if (click)
+            widget = 0;
     }
     if (tray && click) {
         int j = (y - 137) / 30;
@@ -879,6 +1112,9 @@ void pointer(int old, int x, int y) {
     }
     if (!cli && click && dock_at(x, y) >= 0) {
         switch (dock_at(x, y)) {
+        case DOCK_NET:
+            launch(CONNECTIONS);
+            break;
         case DOCK_APPS:
             launcher();
             break;
@@ -931,6 +1167,39 @@ void pointer(int old, int x, int y) {
     }
     if (!click)
         return;
+    if (active == CONNECTIONS) {
+        if (inside(a, b, 320, 35, 135, 30))
+            network_cmd(1, say);
+        else if (inside(a, b, 230, 80, 106, 30))
+            wifi_cmd("scan");
+        else if (inside(a, b, 350, 80, 105, 30)) {
+            launch(TERM);
+            copy(line, "wifi join ", 100);
+            cmdpos = len(line);
+        } else if (inside(a, b, 230, 125, 106, 30))
+            bluetooth("info");
+        else if (inside(a, b, 350, 125, 105, 30))
+            bluetooth("scan");
+        return;
+    }
+    if (active == SYSTEM && b >= 208 && b < 242) {
+        if (hwpage < 0 && a >= 308 && a < 456)
+            hwpage = 0;
+        else if (hwpage >= 0) {
+            if (a >= 267 && a < 455)
+                hwpage = clamp(hwpage + (a >= 365 ? 1 : -1), 0,
+                               driver_count() ? (driver_count() - 1) / 8 : 0);
+            if (a >= 0 && a < 90) {
+                hwpage = -1;
+                if (hwsetup) {
+                    hwsetup = 0;
+                    setup = 1;
+                    hide(0);
+                }
+            }
+        }
+        return;
+    }
     if (active == CALENDAR && inside(a, b, 326, 0, 132, 38))
         monthoff = clamp(monthoff + (a < 375 ? -1 : 1), -1200, 1200);
     if (active == SETTINGS && inside(a, b, 307, 0, 114, 204))
@@ -998,6 +1267,38 @@ void key(int k, int down) {
     }
     if (!down)
         return;
+    if (modal) {
+        if (modal == 2 && k == 21) {
+            consent = 1;
+            modal = 0;
+        } else if (k == 28 || k == 1 || k == 57 || k == 49) {
+            consent = 0;
+            modal = 0;
+        }
+        return;
+    }
+    if (secret) {
+        dirty = 1;
+        char ch = k < (int)sizeof plain ? (shift ? upper[k] : plain[k]) : 0;
+        if (k == 1) {
+            wend();
+            report("Cancelled.");
+        } else if (k == 28) {
+            secret = 0;
+            if (safeat(pass, 63))
+                wifi_start();
+            else {
+                wend();
+                report("Unsupported credential characters.");
+            }
+        } else if (ch == '\b') {
+            int n = len(pass);
+            if (n)
+                pass[n - 1] = 0;
+        } else if (ch >= 32)
+            append(pass, sizeof pass, ch);
+        return;
+    }
     dirty = 1;
     if (pending_doc[0]) {
         if (k == 1 || k == 28)
@@ -1021,6 +1322,14 @@ void key(int k, int down) {
         return;
     }
     if (setup) {
+        if (k == 32) {
+            setup = 0;
+            welcome = 0;
+            hwsetup = 1;
+            hwpage = 0;
+            launch(SYSTEM);
+            return;
+        }
         if (k == 1 || k == 28)
             setup = 0;
         else if (k == 23 && !finished)
@@ -1081,6 +1390,13 @@ void key(int k, int down) {
             launcher();
         return;
     }
+    if (k == 1 && hwsetup && active == SYSTEM) {
+        hwsetup = 0;
+        hwpage = -1;
+        setup = 1;
+        hide(0);
+        return;
+    }
     if (k == 1) {
         if (tray)
             tray = 0;
@@ -1121,26 +1437,56 @@ void key(int k, int down) {
     else if (caps && c >= 'A' && c <= 'Z')
         c += 32;
     if (active == TERM || (active < 0 && cli)) {
-        if (k == 328) {
-            copy(line, lastcmd, 100);
+        if (ctrl && (k == 38 || k == 46)) {
+            if (k == 38)
+                rows = scroll = 0;
+            else
+                say("^C");
+            line[0] = 0;
+            cmdpos = 0;
+            return;
+        }
+        if (k == 329 || k == 337) {
+            scroll = clamp(scroll + (k == 329 ? 6 : -6), 0, rows > 0 ? rows - 1 : 0);
+            return;
+        }
+        if (k == 328 || k == 336) {
+            recall = clamp(recall + (k == 328 ? -1 : 1), 0, ncmd);
+            copy(line, recall == ncmd ? "" : commands[recall], 100);
+            cmdpos = len(line);
+            return;
+        }
+        int n = len(line);
+        cmdpos = clamp(cmdpos, 0, n);
+        if (k == 327 || k == 335) {
+            cmdpos = k == 327 ? 0 : n;
+            return;
+        }
+        if (k == 331 || k == 333) {
+            cmdpos = clamp(cmdpos + (k == 331 ? -1 : 1), 0, n);
             return;
         }
         if (k == 15) {
-            if (len(line))
-                for (int i = 0; i < NAPPS; i++)
-                    if (prefix(apps[i].cmd, line)) {
-                        copy(line, apps[i].cmd, 100);
-                        break;
-                    }
+            for (int i = 0; n && i < NAPPS; i++)
+                if (prefix(apps[i].cmd, line)) {
+                    copy(line, apps[i].cmd, 100);
+                    cmdpos = len(line);
+                    break;
+                }
             return;
         }
         if (c == '\n')
             command();
-        else if (c == '\b') {
-            if (len(line))
-                line[len(line) - 1] = 0;
-        } else if (c >= 32)
-            append(line, 100, c);
+        else if ((c == '\b' && cmdpos > 0) || (k == 339 && cmdpos < n)) {
+            if (c == '\b')
+                cmdpos--;
+            for (int i = cmdpos; i < n; i++)
+                line[i] = line[i + 1];
+        } else if (c >= 32 && n < 99) {
+            for (int i = n; i >= cmdpos; i--)
+                line[i + 1] = line[i];
+            line[cmdpos++] = c;
+        }
         return;
     }
     if (active == WRITER) {
@@ -1194,6 +1540,8 @@ void key(int k, int down) {
 extern void poll(void), beep(int), silence(void);
 static u32 quiet;
 static void sound(void) {
+    if (pcm_tone(660, vol))
+        return;
     if (vol) {
         beep(450 + vol * 50);
         quiet = ticks + 1 + vol / 2;
@@ -1206,6 +1554,9 @@ void main(void) {
     for (int j = 0; j < 198; j++)
         for (int i = 0; i < 466; i++)
             paint[j][i] = WHITE;
+    guest_services(guest_read, guest_box);
+    guest_save_service(guest_save);
+    drivers_init();
     storage_init();
     if (home_ready())
         loadhome();
@@ -1215,6 +1566,8 @@ void main(void) {
     u32 last = 0, clocktick = ticks;
     for (;;) {
         poll();
+        radios_poll();
+        network_poll();
         u32 now = ticks;
         if (feedback[0] && (int)(now - feedback_until) >= 0) {
             feedback[0] = 0;
@@ -1228,7 +1581,7 @@ void main(void) {
             int before = minute;
             clockread();
             clocktick = now;
-            if (before != minute)
+            if (before != minute || active == CONNECTIONS)
                 dirty = 1;
         }
         if (now != last) {
@@ -1269,7 +1622,8 @@ void main(void) {
             if (dirty) {
                 dirty = 0;
                 render();
-            }
+            } else
+                cursor_present(welcome || setup || !cli || active >= 0, 0);
         }
         __asm__ volatile("hlt");
     }

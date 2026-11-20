@@ -29,7 +29,16 @@ def pack(edition):
         z.write(ROOT / "docs/coverage.md", "FEATURES.txt")
         z.write(ROOT / "docs/licenses/DejaVu.txt", "FONT-LICENSE.txt")
         z.write(ROOT / "docs/imp.md", "IMP-FORMAT.txt")
-        for name in ("hello32.imp", "hello64.imp", "hello32.exe", "hello64.exe"):
+        z.write(ROOT / "docs/drivers.md", "HARDWARE-AND-APPS.txt")
+        for name in (
+            "chime.wav",
+            "postcard.exe",
+            "linux.elf",
+            "hello32.imp",
+            "hello64.imp",
+            "hello32.exe",
+            "hello64.exe",
+        ):
             z.write(ROOT / "build" / edition / name, "examples/" + name)
         if vmware(edition):
             for name in ["FreshOS.vmx", "FreshTarget.vmdk"]:

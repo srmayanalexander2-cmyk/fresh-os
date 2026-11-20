@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   attach:
-    if: github.event.release.tag_name == 'v1.1.0'
+    if: github.event.release.tag_name == 'v1.2.0'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -29,4 +29,4 @@ jobs:
             actual=$(unzip -p "$archive" "$iso" | sha256sum | cut -d' ' -f1)
             test "$actual" = "$expected"
           done
-          gh release upload v1.1.0 releases/FreshOS-{Normal,Lite,VMware,VMware-Lite}.{zip,sha256} --clobber
+          gh release upload v1.2.0 releases/FreshOS-{Normal,Lite,VMware,VMware-Lite}.{zip,sha256} --clobber

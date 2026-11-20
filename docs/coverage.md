@@ -185,9 +185,9 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 | 8 GB media and low resource use | Exact capacity; most is a writable Home partition. BIOS smoke uses 32 MiB guest RAM. No comparison benchmark against Windows. |
 | Hardware installer and live mode | Prepared IDE target only, opt-in, verified copy, disk-only boot. No disk-formatting wizard for arbitrary drives. |
 | Windows migration and NTFS | Offline copy of user-selected host files into a raw Home image only; no NTFS driver or automated migration. |
-| EXE installers, IMP compiler, arbitrary Linux apps | Partial: EXE→IMP1 linking and execution for supported PE32/PE32+ programs and selected Win32/CRT calls. No general EXE installer or Linux ABI. |
+| EXE installers, IMP compiler, arbitrary Linux apps | Partial: EXE→IMP1 linking and execution for supported PE32/PE32+ programs and selected Win32/CRT calls. Static x86-64 ELF loader and bounded Linux syscall subset; no general desktop Linux or EXE installer. |
 | Android apps | Removed by request. |
 | Privilege tiers, registry, antivirus, security guards | Not implemented. No claims of process isolation or malware protection. |
-| Universal drivers, VM guest additions and hardware masking | Not implemented. The VMware profile uses standard emulated IDE and PS/2, not guest tools. |
-| Web, media, online drivers, store and network updates | Not implemented. CD and installer are offline. |
+| Universal drivers, VM guest additions and hardware masking | Partial: PCI inventory and in-box device bindings; native VMware guest pointer integration, not official VMware Tools. No hardware masking or universal drivers. |
+| Web, media, online drivers, store and network updates | Partial: PCnet DHCP/ARP, UART radio commands and short AC97 WAV playback. CD/installer offline; no browser, online driver store or updater. |
 | Visual match | Supplied welcome artwork, sky, left rail, clock and launcher geometry. Interactive apps and text are original, not screenshot facsimiles of Chrome or Windows. |

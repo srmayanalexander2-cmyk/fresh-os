@@ -30,6 +30,12 @@ jobs:
       - name: Exercise graphical file conversion and Writer with mouse input
         if: matrix.edition == 'VMware-Lite'
         run: python tests/desktop.py out/FreshOS-VMware-Lite.iso
+      - name: Exercise PCI devices, guest file consent, ELF and UART protocols
+        if: matrix.edition == 'VMware-Lite'
+        run: |
+          python tests/vmguest.py out/FreshOS-VMware-Lite.iso
+          python tests/devices.py out/FreshOS-VMware-Lite.iso
+          python tests/devices.py out/FreshOS-VMware-Lite.iso --uefi --sata
       - name: UEFI boot and interaction
         run: python tools/smoke.py out/FreshOS-${{ matrix.edition }}.iso --uefi ${{ (matrix.edition == 'Normal' || matrix.edition == 'VMware-Lite') && '--install' || '' }}
       - run: python tools/package.py ${{ matrix.edition }}

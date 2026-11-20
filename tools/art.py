@@ -26,9 +26,14 @@ def bake(build, lite, wallpaper=None):
         )
         blob.extend(a.tobytes())
 
-    size = (640, 360) if lite else (960, 540)
+    size = (960, 540) if lite else (1280, 720)
     with Image.open(wallpaper or ROOT / "assets/sky.webp") as photo:
-        asset("SKY", ImageOps.fit(photo, size, method=Image.Resampling.LANCZOS))
+        sky = ImageOps.fit(photo, size, method=Image.Resampling.LANCZOS).convert("RGB")
+        if lite:
+            asset("SKY", sky)
+        else:
+            header.append("#define SKY24 art+0")
+            blob.extend(sky.tobytes("raw", "BGR"))
     # Sawtooth launcher bubbles, sampled once instead of computing trig every frame.
     im = Image.new("RGB", (236, 236), (255, 0, 255))
     px = im.load()
@@ -48,6 +53,9 @@ def bake(build, lite, wallpaper=None):
                 col = (int(8 + 82 * k), int(212 + 18 * k), 255)
             px[x, y] = col
     asset("BURST", im)
+    for glyph in sorted((ROOT / "assets/glyphs").glob("*.png")):
+        with Image.open(glyph) as art:
+            asset("GL_" + glyph.stem.upper(), art)
     icons = atlas()
     for i in range(12):
         asset(f"ICON{i}", icons.crop((i * 64, 0, (i + 1) * 64, 64)))

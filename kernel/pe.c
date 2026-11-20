@@ -23,7 +23,7 @@ static Allocation allocs[128];
 typedef struct {
     u64 r[16], ip, base;
     u32 size, out, budget, allocated, last_error;
-    int wide, cf, zf, sf, of, pf, done;
+    int linuxabi, wide, cf, zf, sf, of, pf, done;
     const char *err;
     PeResult *res;
 } VM;
@@ -171,7 +171,16 @@ enum Api {
     MEMCPY,
     MEMSET,
     MEMCMP,
-    CRT_EXIT
+    CRT_EXIT,
+    VER_A,
+    VER_W,
+    TID,
+    GETVERSION,
+    METRICS,
+    OPEN_A,
+    READ_FILE,
+    CLOSE_HANDLE,
+    PRODUCT
 };
 #define K(n, a) {"kernel32.dll", n, a}
 #define C(n, a) {"msvcrt.dll", n, a}
@@ -202,7 +211,16 @@ static const struct {
                C("memcpy", 3),
                C("memset", 3),
                C("memcmp", 3),
-               C("exit", 1)};
+               C("exit", 1),
+               K("GetVersionExA", 1),
+               K("GetVersionExW", 1),
+               K("GetCurrentThreadId", 0),
+               K("GetVersion", 0),
+               {"user32.dll", "GetSystemMetrics", 1},
+               K("CreateFileA", 7),
+               K("ReadFile", 5),
+               K("CloseHandle", 1),
+               K("GetProductInfo", 5)};
 #define NIMPORT ((int)(sizeof imports / sizeof *imports))
 static int bind(VM *v, u32 at, u32 size) {
     if (!at && !size)
@@ -395,9 +413,29 @@ static int release(VM *v, u64 ptr) {
         }
     return 0;
 }
+static int (*document_read)(const char *, void *, u32);
+static void (*show_box)(const char *);
+void guest_services(int (*read)(const char *, void *, u32), void (*box)(const char *)) {
+    document_read = read;
+    show_box = box;
+}
+static u8 docbuf[16384];
+static int doclen, docpos, writing, dialogs, opens;
+static char docname[32];
+static int (*save_document)(const char *, const void *, u32);
+void guest_save_service(int (*fn)(const char *, const void *, u32)) { save_document = fn; }
+static int text_name(const char *s) {
+    int n = 0;
+    for (; s[n]; n++)
+        if (!((s[n] >= 'a' && s[n] <= 'z') || (s[n] >= '0' && s[n] <= '9') || s[n] == '.' ||
+              s[n] == '_' || s[n] == '-'))
+            return 0;
+    return n > 4 && eqi(s + n - 4, ".txt", 0);
+}
+
 static void api(VM *v, int k) {
     int n = imports[k].argc;
-    u64 a[5] = {0};
+    u64 a[7] = {0};
     static const int regs[] = {1, 2, 8, 9};
     for (int i = 0; i < n; i++)
         a[i] = v->wide && i < 4 ? v->r[regs[i]]
@@ -410,10 +448,109 @@ static void api(VM *v, int k) {
         v->res->exit_code = (u32)a[0];
         return;
     }
+    if (k == TID)
+        result = 1;
+    if (k == PRODUCT && a[4]) {
+        writev(v, a[4], 4, 48);
+        result = 1;
+    }
+    if (k == GETVERSION)
+        result = 10;
+    if (k == METRICS)
+        result = a[0] == 0 ? W : a[0] == 1 ? H : 0;
+    if (k == VER_A || k == VER_W) {
+        u32 size = readv(v, a[0], 4, R);
+        u32 norm = k == VER_A ? 148 : 276;
+        if (size != norm && size != norm + 8)
+            v->last_error = 87;
+        else {
+            u8 *data = mem(v, a[0], size, WRT);
+            if (!data)
+                return;
+            clear(data + 4, size - 4);
+            put(data + 4, 4, 10);
+            put(data + 12, 4, 22631);
+            put(data + 16, 4, 2);
+            if (size == norm + 8)
+                data[norm + 6] = 1;
+            result = 1;
+        }
+    }
+    if (k == OPEN_A) {
+        result = addr(v, ~(u64)0);
+        v->last_error = 5;
+        if (doclen < 0 && opens++ < 16 &&
+            ((document_read && a[1] == 0x80000000u && a[4] == 3) ||
+             (save_document && a[1] == 0x40000000u && a[4] == 2)) &&
+            !a[3] && !a[6]) {
+            char file[32];
+            for (int i = 0; i < 32; i++) {
+                file[i] = readv(v, a[0] + i, 1, R);
+                if (v->err)
+                    return;
+                if (!file[i]) {
+                    if (!text_name(file))
+                        break;
+                    writing = a[1] == 0x40000000u;
+                    bytes((u8 *)docname, (const u8 *)file, i + 1);
+                    doclen = writing ? 0 : document_read(file, docbuf, sizeof docbuf);
+                    docpos = 0;
+                    if (doclen >= 0)
+                        result = 4;
+                    else
+                        v->last_error = 2;
+                    break;
+                }
+            }
+        }
+    }
+    if (k == READ_FILE) {
+        if (a[0] != 4 || writing || doclen < 0 || a[4] || !a[3])
+            v->last_error = 6;
+        else {
+            u32 amt = doclen - docpos;
+            if (amt > a[2])
+                amt = a[2];
+            if (amt) {
+                u8 *dst = mem(v, a[1], amt, WRT);
+                if (!dst || !charge(v, 1 + amt / 16))
+                    return;
+                bytes(dst, docbuf + docpos, amt);
+            }
+            writev(v, a[3], 4, amt);
+            docpos += amt;
+            result = 1;
+        }
+    }
+    if (k == CLOSE_HANDLE) {
+        if (a[0] == 4 && doclen >= 0) {
+            result = !writing || (dialogs++ < 8 && save_document(docname, docbuf, doclen));
+            if (!result)
+                v->last_error = 5;
+            doclen = -1;
+            writing = 0;
+        } else
+            v->last_error = 6;
+    }
     if (k == STD_HANDLE) {
         result = (u32)a[0] == (u32)-11 ? 1 : (u32)a[0] == (u32)-12 ? 2 : 0;
     }
-    if (k >= WRITE_FILE && k <= WRITE_W) {
+    if (k == WRITE_FILE && a[0] == 4) {
+        if (doclen < 0 || !writing || !a[3] || a[4] || a[2] > sizeof docbuf - (u32)doclen)
+            v->last_error = 5;
+        else {
+            u32 sz = a[2];
+            if (sz) {
+                const u8 *src = mem(v, a[1], sz, R);
+                if (!src || !charge(v, 1 + sz / 16))
+                    return;
+                bytes(docbuf + doclen, src, sz);
+            }
+            doclen += sz;
+            writev(v, a[3], 4, sz);
+            result = 1;
+        }
+    } else if (k >= WRITE_FILE && k <= WRITE_W) {
         u32 count = (u32)a[2], stride = k == WRITE_W ? 2 : 1;
         if (count > 16384 || a[4] || (a[0] != 1 && a[0] != 2)) {
             fail(v, "Only bounded writes to standard output/error are supported");
@@ -440,12 +577,19 @@ static void api(VM *v, int k) {
             fail(v, "Only plain message boxes are supported");
             return;
         }
+        u32 begin = v->out;
         if (a[2]) {
             string(v, a[2], k == BOX_W, 1);
             emit(v, '\n');
         }
         if (a[1])
             string(v, a[1], k == BOX_W, 1);
+        if (!v->err && show_box && dialogs++ >= 8) {
+            fail(v, "Dialog budget exceeded");
+            return;
+        }
+        if (!v->err && show_box)
+            show_box(v->res->output + begin);
         result = 1;
     }
     if (k == LENGTH_A || k == LENGTH_W || k == STRLEN)
@@ -510,7 +654,7 @@ static void api(VM *v, int k) {
     }
     v->r[0] = result;
     v->ip = pop(v);
-    if (!v->wide && k < CRT_START)
+    if (!v->wide && (k < CRT_START || k > CRT_EXIT))
         v->r[4] = addr(v, v->r[4] + 4 * n);
 }
 /* Decode ModR/M and SIB. RIP-relative operands are resolved only after the
@@ -666,6 +810,71 @@ static void step(VM *v) {
     }
     if (op == 0x0f) {
         op = fetch(v, 1);
+        if (op == 5 && v->linuxabi) {
+            u64 call = v->r[0], fd = v->r[7], addr = v->r[6], sz = v->r[2];
+            v->r[1] = v->ip;
+            v->r[11] = 2;
+            if (call == 60 || call == 231) {
+                v->done = 1;
+                v->res->exit_code = fd & 255;
+            } else if (call == 39 || call == 186)
+                v->r[0] = 1;
+            else if (call == 2 || call == 257) {
+                u64 path = call == 2 ? fd : addr, flags = call == 2 ? addr : sz;
+                v->r[0] = (u64)-13;
+                if (flags == 0 && doclen < 0 && opens++ < 16 && document_read &&
+                    (call == 2 || (int)fd == -100)) {
+                    char name[32];
+                    for (int i = 0; i < 32; i++) {
+                        name[i] = readv(v, path + i, 1, R);
+                        if (v->err)
+                            return;
+                        if (!name[i]) {
+                            if (text_name(name)) {
+                                doclen = document_read(name, docbuf, sizeof docbuf);
+                                docpos = 0;
+                                v->r[0] = doclen < 0 ? (u64)-2 : 3;
+                            }
+                            break;
+                        }
+                    }
+                }
+            } else if (call == 0) {
+                v->r[0] = (u64)-9;
+                if (fd == 3 && doclen >= 0) {
+                    u32 n = doclen - docpos;
+                    if (sz < n)
+                        n = sz;
+                    if (n) {
+                        u8 *to = mem(v, addr, n, WRT);
+                        if (!to || !charge(v, 1 + n / 16))
+                            return;
+                        bytes(to, docbuf + docpos, n);
+                    }
+                    docpos += n;
+                    v->r[0] = n;
+                }
+            } else if (call == 3) {
+                v->r[0] = (u64)-9;
+                if (fd == 3 && doclen >= 0) {
+                    doclen = -1;
+                    v->r[0] = 0;
+                }
+            } else if (call == 1 && (fd == 1 || fd == 2)) {
+                if (sz > 16384 || !charge(v, (u32)sz + 1)) {
+                    fail(v, "Linux write exceeds limit");
+                    return;
+                }
+                const u8 *p = sz ? mem(v, addr, sz, R) : 0;
+                if (v->err)
+                    return;
+                for (u32 i = 0; i < sz; i++)
+                    emit(v, p[i]);
+                v->r[0] = sz;
+            } else
+                v->r[0] = (u64)-38;
+            return;
+        }
         if (op >= 0x80 && op <= 0x8f) {
             u64 d = sx(fetch(v, 4), 4);
             if (cond(v, op & 15))
@@ -768,17 +977,20 @@ unsupported:
 }
 static int execute(VM *state) {
     VM v = *state;
+    doclen = -1;
+    docpos = writing = dialogs = opens = 0;
     PeResult *r = v.res;
     if (!v.err) {
         v.r[4] = STACK + STACK_SIZE - 64;
-        push(&v, RETURN);
+        if (!v.linuxabi)
+            push(&v, RETURN); /* ELF starts with empty argv/env/auxv in zeroed stack. */
     }
     while (!v.err && !v.done && v.budget--) {
         r->steps++;
-        if (v.ip == RETURN) {
+        if (!v.linuxabi && v.ip == RETURN) {
             v.done = 1;
             r->exit_code = (u32)v.r[0];
-        } else if (v.ip >= ABI && v.ip < ABI + 16 * NIMPORT && !(v.ip & 15))
+        } else if (!v.linuxabi && v.ip >= ABI && v.ip < ABI + 16 * NIMPORT && !(v.ip & 15))
             api(&v, (int)((v.ip - ABI) / 16));
         else
             step(&v);
@@ -901,3 +1113,5 @@ int imp_run(const u8 *f, u32 n, PeResult *r) {
     v.err = imp_load(&v, f, n);
     return execute(&v);
 }
+
+#include "elf.inc"

@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Machine:
-    def __init__(self, folder, iso=None, disk=None, uefi=False):
+    def __init__(self, folder, iso=None, disk=None, uefi=False, extra=()):
         self.log = folder / "serial.txt"
         self.log.unlink(missing_ok=True)
         args = [
@@ -49,6 +49,7 @@ class Machine:
                     "-drive",
                     f"if=pflash,format=raw,{mode},file={os.getenv(key,default)}",
                 ]
+        args.extend(extra)
         self.p = subprocess.Popen(
             args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL
         )
@@ -111,13 +112,22 @@ def smoke(iso, uefi, install):
             m.type("start\n")
             for bits in (32, 64):
                 m.type(f"open hello{bits}.exe\n")
+                if bits == 64:
+                    m.wait("Win32 modal awaiting OK")
+                    m.key("ret")
                 m.wait(f"EXE to IMP{bits} completed")
                 m.key("f4")
                 m.type(f"convert hello{bits}.exe\n")
                 m.wait(f"IMP linked: hello{bits}.imp")
                 m.type(f"open hello{bits}.imp\n")
+                if bits == 64:
+                    m.wait("Win32 modal awaiting OK", 2)
+                    m.key("ret")
                 m.wait(f"IMP{bits} completed", 2)
                 m.key("f4")
+            m.type("open linux.elf\n")
+            m.wait("Linux ELF completed")
+            m.key("f4")
             m.type("calc\n")
             m.wait("app: calc")
             if install:
@@ -165,6 +175,8 @@ def smoke(iso, uefi, install):
                 m.wait("EXE to IMP32 completed")
                 m.key("f4")
                 m.type("open guest.imp\n")
+                m.wait("Win32 modal awaiting OK")
+                m.key("ret")
                 m.wait("IMP64 completed")
                 m.key("f4")
                 m.type("convert guest.exe\n")

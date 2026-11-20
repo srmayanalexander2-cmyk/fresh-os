@@ -38,6 +38,8 @@ def verify(path):
                 sample[pe : pe + 4] == b"PE\0\0"
                 and struct.unpack_from("<H", sample, pe + 4)[0] == machine
             )
+        samples.extend([load("POSTCARD.EXE"), load("LINUX.ELF"), load("CHIME.WAV")])
+        assert samples[-2][:4] == b"\x7fELF" and samples[-1][:4] == b"RIFF"
         assert all(s in boot[2048:] for s in samples)
         lba = iso.get_record(iso_path="/FRESHOS.BIN;1").extent_location()
         assert (

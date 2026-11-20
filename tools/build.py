@@ -26,6 +26,24 @@ def build(edition, wallpaper=None, compact=False):
     out.mkdir(exist_ok=True)
     bake(b, lite(edition), wallpaper)
     make_exes(b)
+    # Original two-note interface sound: real mono PCM shared by Files and the host.
+    import wave, math
+
+    with wave.open(str(b / "chime.wav"), "wb") as w:
+        w.setparams((1, 2, 24000, 0, "NONE", "PCM"))
+        w.writeframes(
+            b"".join(
+                struct.pack(
+                    "<h",
+                    round(
+                        7300
+                        * math.sin(2 * math.pi * (660 if i < 4800 else 880) * i / 24000)
+                        * min(1, i % 4800 / 240, (4800 - i % 4800) / 900)
+                    ),
+                )
+                for i in range(9600)
+            )
+        )
     run(
         [
             "gcc",
@@ -42,7 +60,25 @@ def build(edition, wallpaper=None, compact=False):
         ],
         b,
     )
-    payloads = {}
+    run(["as", "--64", ROOT / "examples/linux/hello.S", "-o", "hello-linux.o"], b)
+    run(
+        [
+            "ld",
+            "-m",
+            "elf_x86_64",
+            "--build-id=none",
+            "-s",
+            "hello-linux.o",
+            "-o",
+            "linux.elf",
+        ],
+        b,
+    )
+    payloads = {
+        "linuxdemo": "linux.elf",
+        "postcard": "postcard.exe",
+        "chime": "chime.wav",
+    }
     for bits in (32, 64):
         dest = b / f"hello{bits}.imp"
         dest.unlink(missing_ok=True)
@@ -86,6 +122,7 @@ def build(edition, wallpaper=None, compact=False):
         ROOT / "kernel/platform.c",
         ROOT / "kernel/shell.c",
         ROOT / "kernel/storage.c",
+        ROOT / "kernel/drivers.c",
         ROOT / "kernel/memory.c",
         ROOT / "kernel/pe.c",
         b / "art.S",
@@ -211,6 +248,9 @@ ide1:0.deviceType = "cdrom-image"
 ide1:0.fileName = "FreshOS-{edition}.iso"
 ide1:0.startConnected = "TRUE"
 bios.bootOrder = "cdrom"
+ethernet0.present = "TRUE"
+ethernet0.virtualDev = "vlance"
+ethernet0.connectionType = "nat"
 usb.present = "FALSE"
 """.lstrip())
     return path

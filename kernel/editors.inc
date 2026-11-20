@@ -131,13 +131,19 @@ static void files_draw(int x, int y) {
         int yy = y + 55 + j * 34;
         gel(x, yy, 466, 30, 8, WHITE, i == fileidx ? 0xaceede : 0xe1eff2,
             i == fileidx ? 0xd4fff1 : 0xf2f8f9);
-        int app = suffix(name, ".imp") || suffix(name, ".exe") ? WINDOWS
-                  : eq(name, "canvas")                         ? PAINT
-                                                               : WRITER;
-        icon(x + 6, yy + 2, app, 25);
+        int app = suffix(name, ".elf") || suffix(name, ".imp") || suffix(name, ".exe")
+                      ? WINDOWS
+                  : eq(name, "canvas") ? PAINT
+                                       : WRITER;
+        if (suffix(name, ".wav")) {
+            GLYPH(SOUND, x + 6, yy + 4, 27, 20);
+        } else
+            icon(x + 6, yy + 2, app, 25);
         text(x + 42, yy + 4, name, 1, INK);
         text(x + 345, yy + 7,
-             suffix(name, ".exe")   ? "Windows EXE"
+             suffix(name, ".wav")   ? "PCM sound"
+             : suffix(name, ".elf") ? "Linux ELF"
+             : suffix(name, ".exe") ? "Windows EXE"
              : suffix(name, ".imp") ? "IMP image"
              : app == PAINT         ? "Artwork"
                                     : "Document",

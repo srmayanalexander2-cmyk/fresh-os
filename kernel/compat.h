@@ -10,6 +10,9 @@ typedef struct {
     u32 exit_code, steps;
     int bits;
 } PeResult;
+void guest_save_service(int (*fn)(const char *, const void *, u32));
+void guest_services(int (*read)(const char *, void *, u32), void (*box)(const char *));
+int elf_run(const u8 *, u32, PeResult *);
 int pe_run(const u8 *file, u32 size, PeResult *result);
 u32 imp_convert(const u8 *, u32, u8 *, u32, PeResult *);
 int imp_run(const u8 *, u32, PeResult *);

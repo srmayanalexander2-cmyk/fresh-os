@@ -166,6 +166,34 @@ class Compat(unittest.TestCase):
             b"budget", self.pe(f[:code] + b"\xeb\xfe" + f[code + 2 :], False).detail
         )
 
+    def test_static_linux(self):
+        subprocess.run(
+            ["as", "--64", ROOT / "examples/linux/hello.S", "-o", self.work / "elf.o"],
+            check=True,
+        )
+        path = self.work / "demo.elf"
+        subprocess.run(
+            ["ld", "-s", "--build-id=none", self.work / "elf.o", "-o", path], check=True
+        )
+        data = path.read_bytes()
+        r = Result()
+        self.lib.elf_run.argtypes = self.lib.pe_run.argtypes
+        self.assertTrue(self.lib.elf_run(data, len(data), c.byref(r)), r.detail)
+        self.assertEqual((r.code, r.output), (0, subprocess.check_output([path])))
+        for off, fmt, value in [
+            (4, "B", 1),
+            (16, "H", 3),
+            (24, "Q", 0),
+            (32, "Q", 2**64 - 1),
+            (56, "H", 65535),
+            (64, "I", 3),
+            (64 + 32, "Q", 0xFFFFFFFFFFFFFFFF),
+        ]:
+            bad = bytearray(data)
+            struct.pack_into("<" + fmt, bad, off, value)
+            self.assertFalse(self.lib.elf_run(bytes(bad), len(bad), c.byref(r)))
+            self.assertEqual(r.steps, 0)
+
     def test_imp_validation(self):
         good = self.link((self.work / "hello32.exe").read_bytes())
         for pos, value, crc in [

@@ -11,7 +11,7 @@ from home import Home
 class Mouse:
     def __init__(self, m):
         self.m = m
-        self.x, self.y = 480, 270
+        self.x, self.y = 640, 360
 
     def click(self, x, y):
         while (x, y) != (self.x, self.y):
@@ -47,18 +47,26 @@ def exercise(iso, shots):
             time.sleep(0.4)
             capture("welcome")
             p = Mouse(m)
-            p.click(495, 348)
+            p.click(834, 452)
             m.wait("desktop ready", timeout=4)
-            p.click(38, 92)
+            p.click(22, 239)
+            capture("volume")
+            p.click(278, 251)
+            p.click(620, 150)
+            p.click(22, 206)
+            m.wait("app: connections")
+            capture("connections")
+            m.key("f4")
+            p.click(22, 25)
             m.wait("app: files", timeout=4)
-            p.click(360, 247)
+            p.click(528, 387)
             capture("files")
-            p.click(396, 335)
+            p.click(564, 475)
             m.wait("IMP linked: hello32.imp", timeout=4)
-            p.click(275, 335)
+            p.click(443, 475)
             m.wait("IMP32 completed", timeout=4)
             capture("program")
-            p.click(38, 142)
+            p.click(22, 64)
             m.wait("app: writer", timeout=4)
             m.type("clouds")
             m.key("left")
@@ -67,7 +75,7 @@ def exercise(iso, shots):
             m.key("end")
             m.type(" glow")
             capture("writer")
-            p.click(640, 342)
+            p.click(808, 482)
             # Save as dialog (replace suggested name).
             for _ in range(8):
                 m.key("backspace")

@@ -1,5 +1,7 @@
 #include "platform.h"
 #include "storage.h"
+#include "drivers.h"
+static int transport;
 #define ATA 0x1f0
 #define CD 0x170
 #define HOME 32768u
@@ -56,6 +58,10 @@ static int ident(u32 *capacity) {
 static int sector(u32 lba, void *buf, int write) {
     if (lba >= CAP_SECTORS)
         return 0;
+    if (transport == 2)
+        return sata_io(lba, buf, write);
+    if (transport)
+        return vblk_io(lba, buf, write);
     u8 *d = buf;
     wr(ATA + 6, 0xe0 | ((lba >> 24) & 15));
     delay(ATA);
@@ -79,6 +85,10 @@ static int sector(u32 lba, void *buf, int write) {
     return wait(ATA, 0);
 }
 static int flush(void) {
+    if (transport == 2)
+        return sata_io(0, 0, 4);
+    if (transport)
+        return vblk_io(0, 0, 4);
     wr(ATA + 7, 0xe7);
     delay(ATA);
     return wait(ATA, 0);
@@ -166,8 +176,19 @@ void storage_init(void) {
     u8 sec[512];
     struct Super a, b;
     mounted = marked = 0;
-    if (!ident(&capacity) || capacity < CAP_SECTORS || !sector(0, sec, 0))
-        return;
+    transport = 0;
+    if (!ident(&capacity) || capacity < CAP_SECTORS || !sector(0, sec, 0) ||
+        !(token(sec) || media(sec))) {
+        for (transport = 1; transport <= 2; transport++) {
+            capacity = transport == 1 ? vblk_size() : sata_size();
+            if (capacity >= CAP_SECTORS && sector(0, sec, 0) && (media(sec) || token(sec)))
+                break;
+        }
+        if (transport > 2) {
+            transport = 0;
+            return;
+        }
+    }
     if (token(sec)) {
         marked = 1;
         status = "Prepared install target found.";
@@ -182,7 +203,9 @@ void storage_init(void) {
         return;
     fs = av && (!bv || a.seq >= b.seq) ? a : b;
     mounted = 1;
-    status = "Fresh Home mounted (primary IDE).";
+    status = transport == 2 ? "Fresh Home mounted (AHCI/SATA)."
+             : transport    ? "Fresh Home mounted (virtio-blk)."
+                            : "Fresh Home mounted (primary IDE).";
 }
 int home_ready(void) { return mounted; }
 const char *disk_status(void) { return status; }
@@ -291,7 +314,7 @@ static u8 data_cd[2048], mbr[512];
 static int copying;
 int install_probe(void) {
     if (!marked) {
-        status = "Needs a prepared primary IDE target.";
+        status = "Needs a marked IDE, SATA or virtio target.";
         return 0;
     }
     if (!cdread(0, data_cd) || !media(data_cd)) {

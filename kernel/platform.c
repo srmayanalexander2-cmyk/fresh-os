@@ -1,4 +1,5 @@
 #include "platform.h"
+#include "drivers.h"
 static inline u8 in(u16 p) {
     u8 v;
     __asm__ volatile("inb %1,%0" : "=a"(v) : "Nd"(p));
@@ -63,6 +64,41 @@ static void aux(int c) {
 int sw, sh, pitch, red_first;
 volatile u32 *fb;
 static int dw, dh, offx, offy, xmap[1920];
+static volatile u32 *dispi_base;
+static int page;
+static void dispi(int reg, int val) {
+    __asm__ volatile("outw %%ax,%%dx" ::"a"((u16)reg), "d"((u16)0x1ce));
+    __asm__ volatile("outw %%ax,%%dx" ::"a"((u16)val), "d"((u16)0x1cf));
+}
+static u16 dispi_read(int reg) {
+    u16 v;
+    __asm__ volatile("outw %%ax,%%dx" ::"a"((u16)reg), "d"((u16)0x1ce));
+    __asm__ volatile("inw %%dx,%%ax" : "=a"(v) : "d"((u16)0x1cf));
+    return v;
+}
+/* Firmware remains the fallback. Bind only when the firmware already set the
+ * matching BGR32 linear mode and two whole pages fit the reported BAR. */
+int display_flip_bind(u32 bar) {
+    if (bar < 0x1000000 || sw != W || sh != H || pitch != W || red_first ||
+        (unsigned long)fb != bar || bar > 0xffffffffu - 8 * 1024 * 1024)
+        return 0;
+    u16 id = dispi_read(0);
+    if ((id != 0xb0c4 && id != 0xb0c5) || dispi_read(1) != W || dispi_read(2) != H ||
+        dispi_read(3) != 32 || !(dispi_read(4) & 0x40) ||
+        dispi_read(10) * 65536u < 2u * 4 * W * H || dispi_read(6) != W ||
+        dispi_read(7) < 2 * H)
+        return 0;
+    dispi_base = fb;
+    dispi(8, 0);
+    dispi(9, 0);
+    serial("DISPI double buffer active\r\n");
+    return 1;
+}
+const char *display_driver(void) {
+    return dispi_base           ? "Bochs DISPI / native 720p page flip"
+           : sw == W && sh == H ? "Firmware framebuffer / native 720p"
+                                : "Firmware framebuffer / scaled viewport";
+}
 u32 screen[H][W];
 int mx = W / 2, my = H / 2, buttons;
 #define VI(o, T) (*(volatile T *)(0x5200 + (o)))
@@ -124,15 +160,58 @@ void hw_init(void) {
     out(0x40, 19886 >> 8);
     __asm__ volatile("sti");
 }
-void present(void) {
-    for (int y = 0; y < dh; y++) {
-        u32 *row = screen[y * H / dh];
+/* The backing store never contains the pointer. Restore only its old and new
+ * bounds on motion. Full frames at native 720p copy contiguous scan lines. */
+static void blit(int left, int top, int right, int bottom, int cursor) {
+    int x0 = (clamp(left, 0, W) * dw + W - 1) / W, x1 = (clamp(right, 0, W) * dw + W - 1) / W;
+    int y0 = (clamp(top, 0, H) * dh + H - 1) / H, y1 = (clamp(bottom, 0, H) * dh + H - 1) / H;
+    for (int y = y0; y < y1; y++) {
+        int sy = y * H / dh;
+        const u32 *row = screen[sy];
         volatile u32 *d = fb + (offy + y) * pitch + offx;
-        for (int x = 0; x < dw; x++) {
-            u32 c = row[xmap[x]];
+        if (!cursor && dw == W && !red_first) {
+            const u32 *s = row + x0;
+            volatile u32 *dst = d + x0;
+            unsigned long count = x1 - x0;
+            __asm__ volatile("rep movsl" : "+S"(s), "+D"(dst), "+c"(count)::"memory");
+            continue;
+        }
+        for (int x = x0; x < x1; x++) {
+            int sx = xmap[x];
+            u32 c = row[sx];
+            if (cursor) {
+                int j = sy - my, i = sx - mx;
+                if (j >= 0 && j < 17 && i >= 0 && i <= j * 2 / 3 && i < 9 &&
+                    (i < 3 || j < 12))
+                    c = (i == 0 || i == j * 2 / 3 || j == 16 || j == 11) ? 0x154455
+                                                                         : 0xf6ffff;
+            }
             d[x] = red_first ? ((c & 255) << 16 | (c & 0xff00) | (c >> 16)) : c;
         }
     }
+}
+void present(void) {
+    if (dispi_base) {
+        page ^= 1;
+        fb = dispi_base + page * W * H;
+    }
+    blit(0, 0, W, H, 0);
+    if (dispi_base) {
+        __sync_synchronize();
+        dispi(9, page * H);
+    }
+}
+void cursor_present(int visible, int fresh) {
+    static int ox = -32, oy = -32, was;
+    if (!fresh && visible == was && mx == ox && my == oy)
+        return;
+    if (!fresh && was)
+        blit(ox, oy, ox + 11, oy + 18, 0);
+    if (visible)
+        blit(mx, my, mx + 11, my + 18, 1);
+    ox = mx;
+    oy = my;
+    was = visible;
 }
 void poll(void) {
     static u8 packet[3];
@@ -148,7 +227,14 @@ void poll(void) {
             packet[n++] = b;
             if (n == 3) {
                 n = 0;
-                if (!(packet[0] & 192)) {
+                int ax, ay, b, absolute = guest_pointer(&ax, &ay, &b);
+                if (absolute == 1) {
+                    int old = buttons;
+                    mx = clamp((ax * sw / 65535 - offx) * W / dw, 0, W - 1);
+                    my = clamp((ay * sh / 65535 - offy) * H / dh, 0, H - 1);
+                    buttons = b;
+                    pointer(old, mx, my);
+                } else if (absolute < 0 && !(packet[0] & 192)) {
                     mx = clamp(mx + packet[1] - (packet[0] & 16 ? 256 : 0), 0, W - 1);
                     my = clamp(my - packet[2] + (packet[0] & 32 ? 256 : 0), 0, H - 1);
                     int old = buttons;
