@@ -16,7 +16,9 @@ static int suffix(const char *s, const char *ext) {
     return a >= b && eq(s + a - b, ext);
 }
 static u32 feedback_until;
+static void log_event(const char *);
 static void notify(const char *s) {
+    log_event(s);
     copy(feedback, s, sizeof feedback);
     say(s);
     feedback_until = ticks + 210;

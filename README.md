@@ -1,4 +1,4 @@
-# FreshOS 1.2 · Native sky desktop
+# FreshOS 1.3 · Native sky desktop
 
 A native, experimental x86 desktop built for the supplied cloud-and-glass design. The loaders, kernel, framebuffer renderer, input drivers, shell, app sessions, installer, Fresh Home filesystem and IMP linker and bounded x86 interpreter are written here. **It is not a Linux image, a browser kiosk, or a Windows distribution.** The OS does not require the internet to start.
 
@@ -15,7 +15,9 @@ Extract **one** ZIP64 archive. Each contains a bootable `.iso`, exactly **8,000,
 
 **What occupies the space:** the native BIOS payload is under 4 MB; the hybrid image also carries an 8 MiB FAT16 EFI system partition. At byte 16,777,216 begins the writable **Fresh Home** partition. Its initially empty space is why the downloads compress well. This is 8 GB of *disk capacity*, not 8 GB of implemented software. An optical drive is read-only; user data needs a writable, supported disk. The compact developer build omits Home and cannot be installed with the native installer.
 
-**New in 1.2:** [Hardware matrix, radio wiring, commands, Windows and Linux app guides](docs/drivers.md). Probe real hardware with **Setup → Drivers**. The recommended VMware profile includes native guest integration and an emulated PCnet NIC, not proprietary VMware Tools.
+**New in 1.3:** four virtual desktops, six native utility sessions, screen capture, clipboard, on-screen keyboard, alarms, SHA3-256 and TAR/gzip creation. See [controls and limits](#3--use-the-desktop) and the [full Windows request checklist](docs/coverage.md).
+
+**Hardware in 1.2:** [Hardware matrix, radio wiring, commands, Windows and Linux app guides](docs/drivers.md). Probe real hardware with **Setup → Drivers**. The recommended VMware profile includes native guest integration and an emulated PCnet NIC, not proprietary VMware Tools.
 
 ## 2 · Boot or install
 
@@ -40,15 +42,23 @@ Click the rail icons for Files, Writer, Settings, Clock, tray, Connections, volu
 | Control | Action |
 |---|---|
 | Enter | Enter live session; select focused launcher or tray item |
-| F1 / Apps on the rail | All Apps in GUI; text Start in CLI. Arrows / Tab to navigate. Click More for page two. |
+| F1 / Apps on the rail | All Apps in GUI; text Start in CLI. Arrows / Tab to navigate. Click More to cycle pages. |
 | Windows key / F2 | Minimized apps; Up/Down and Enter restore. F2 works when the host intercepts Win. |
+| Win+Tab / `desktops` | Select one of four desktops. Ctrl+Win+Left/Right switches directly. Apps are singletons: launching one elsewhere moves that session. |
+| F8 / Win+A | Actions: arrows scroll; Shift+arrows reorder; Enter invokes. Energy saver adjusts brightness and motion only. |
+| F9 / F10 | Toggle the 2× lens / drag a rectangle to save `snip.bmp` to writable Home. Esc cancels capture. |
+| F11 / `osk` | Toggle a clickable keyboard in Writer, Stickies, To Do or the command line. |
 | F3 | Switch between the graphical desktop and command-line desktop |
 | F4 / Esc / window `_` | Minimize without losing state. `x` closes the session. Drag the title bar to move a window. |
 | F6 / F7 | Sound-feedback level / screen dimmer; Left/Right adjusts, Esc dismisses |
 
 **Command-line desktop:** no desktop cursor; the cursor returns inside graphical apps. `start` lists runnable apps as text and leaves the prompt active. Type an app name, or `open NAME`. Prefixes show matching apps; Tab completes a name, Up recalls the last command. Try `start`, `writer`, F4, `tasks`, `resume writer`, `wall lagoon`, `color ice`, `time`, `gui` or `help`.
 
-**Apps:** Files (select/open, Library/Recent, EXE conversion), Writer (plain-text editor), Paint, Calculator (integer arithmetic), hardware Clock, Settings, Terminal, playable Minefield, System information, month Calendar, Tasks and Programs (IMP/EXE output). These are built-in sessions in one address space, not isolated preemptive user processes.
+**Apps:** Files (select/open, Library/Recent, EXE conversion), Writer (plain-text editor), Paint, Calculator (integer arithmetic), hardware Clock, Settings, Terminal, playable Minefield, System information, month Calendar, Tasks, Programs (IMP/EXE output), Connections, Stickies, To Do, Glyphs, Tips, Events and Actions. These are built-in sessions in one address space, not isolated preemptive user processes.
+
+**Try the utilities:** In Stickies, type a note, press Ctrl+C, then Ctrl+S. In To Do, paste with Ctrl+V and press Enter to add it; Tab checks the selected item and Ctrl+S saves the list. Three cards and twelve checklist items fit. Glyphs copies printable ASCII. Writer copies its whole document; Terminal uses Ctrl+Shift+C for its input line. Clipboard and the last 32 shell events are session-only.
+
+In Terminal, `alarm 09:30` sets a one-shot local-clock alert and `timer 60` sets a one-minute countdown. Open Clock to see their status; `alarm off` and `timer off` cancel. `sha3 sticky1.txt` prints a SHA3-256 digest. `tar notes.tar sticky1.txt todo.list` archives both saved files, and `gzip list.gz todo.list` wraps one file in gzip (stored blocks; no size reduction). Archive output is limited to 256 KiB and needs writable Home. No extraction or .7z support.
 
 ## 4 · Keep files and preferences
 

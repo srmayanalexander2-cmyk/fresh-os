@@ -9,9 +9,9 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 |---|---|
 | Hybrid Start Menu (combined traditional list with resizable Live Tiles) | Partial: GUI launcher and command-line Start; no Live Tiles. |
 | Continuum (automatic/manual tablet mode switch) | Not implemented. |
-| Task View and Virtual Desktops (Win + Tab) | Partial: keyboard app tray; no virtual desktops. |
+| Task View and Virtual Desktops (Win + Tab) | Four local desktops (Win+Tab); each keeps its foreground and minimized sessions. One instance per app. |
 | Snap Assist & Quadrant Snapping (2x2 window snapping) | Not implemented. |
-| Action Center & Quick Actions sidebar | Not implemented. |
+| Action Center & Quick Actions sidebar | Native Actions window (F8 or Win+A); eight quick actions and a separate in-memory event log, not a Windows notification service. |
 | Universal Windows Platform (UWP) app architecture | Not implemented. |
 | Quick Access File Explorer view | Partial: workspace shortcuts and named Home records, not Windows Explorer. |
 | Unified Settings App | Partial: native shell, wallpaper, motion, text, brightness and feedback settings. |
@@ -22,17 +22,17 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 | DirectX 12 low-level graphics API | Not implemented. |
 | Game DVR & Game Bar (Win + G) | Not implemented. |
 | Windows Update for Business & Peer-to-Peer update sharing | Not implemented. |
-| Command Prompt enhancements (Ctrl + C/Ctrl + V, word wrap) | Partial: editable command line, previous command, app suggestions and completion; no clipboard. |
+| Command Prompt enhancements (Ctrl + C/Ctrl + V, word wrap) | Soft-wrapped output; Ctrl+Shift+C copies the input line, Ctrl+V pastes, Ctrl+C cancels input. No console selection or Windows CMD scripting. |
 | Native MKV, FLAC, and HEVC codec support | Not implemented. |
 
 ## Windows 11 (Version 24H2) Features
 
 | Request | Status |
 |---|---|
-| Scrollable Quick Settings flyout with reorderable toggles | Not implemented. |
+| Scrollable Quick Settings flyout with reorderable toggles | Actions shows four rows at a time; arrows scroll, Shift+arrows reorder. Order is session-only. |
 | File Explorer context menu text labels beneath top-row icons | Partial: Files launches the session note and canvas; Home commands manage named records. |
-| Native 7-Zip and TAR archive creation (.7z, .tar, .gz, .bz2, .xz, .zst) | Not implemented. |
-| Energy Saver mode (for both laptops and desktops) | Not implemented. |
+| Native 7-Zip and TAR archive creation (.7z, .tar, .gz, .bz2, .xz, .zst) | Partial: create interoperable ustar and stored-block gzip in writable Home (256 KiB output cap); no extraction, .7z, .bz2, .xz or .zst. |
+| Energy Saver mode (for both laptops and desktops) | Partial: a shell preset dims the display and disables animation. No CPU, battery or firmware power policy. |
 | Content Adaptive Brightness Control (CABC) on AC power | Not implemented. |
 | Voice Clarity (echo cancellation and noise suppression) | Not implemented. |
 | Phone Link Start Menu companion panel | Not implemented. |
@@ -48,7 +48,7 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 | Windows Protected Print Mode (driverless Mopria printing) | Not implemented. |
 | Personal Data Encryption (PDE) for folder-level security | Not implemented. |
 | Local Security Authority (LSA) protection enabled by default | Not implemented. |
-| SHA-3 cryptographic support | Not implemented. |
+| SHA-3 cryptographic support | SHA3-256 file digest via `sha3 NAME`; no general Windows crypto provider. |
 | App Control for Business (WDAC enhancements) | Not implemented. |
 | Windows LAPS automated local admin account management | Not implemented. |
 | Wi-Fi network list privacy controls | Not implemented. |
@@ -97,7 +97,7 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 | WMIC (Windows Management Instrumentation Command-line) | Not implemented. |
 | Location History API | Not implemented. |
 | Windows Maps & Movies & TV (removed from clean 25H2 installs) | Not implemented. |
-| Tips app | Not implemented. |
+| Tips app | Six offline FreshOS guides with working app links. |
 | 32-bit ARM (ARM32) UWP app support | Not implemented. |
 | VBScript (disabled by default) | Not implemented. |
 | TLS 1.0 & 1.1 protocols (disabled by default) | Not implemented. |
@@ -108,20 +108,20 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 
 | Request | Status |
 |---|---|
-| Alarms & Clock | Partial: RTC-backed clock and calendar; no alarms. |
+| Alarms & Clock | Local RTC clock, one-shot alarm and countdown while the kernel is running; no wake or background scheduling after shutdown. |
 | App Installer | Not implemented. |
 | Calculator | Partial: native integer four-function calculator. |
 | Camera | Not implemented. |
-| Character Map | Not implemented. |
+| Character Map | 95 printable ASCII glyphs; mouse or keyboard selection copies the character to the session clipboard. No Unicode font browser. |
 | Clipchamp | Not implemented. |
 | Component Services | Not implemented. |
 | Computer Management | Not implemented. |
 | Control Panel | Partial: unified Settings for implemented controls. |
 | Defragment and Optimize Drives | Not implemented. |
-| Device Manager | Not implemented. |
+| Device Manager | Partial: Setup → Drivers and System show actual PCI IDs and bound drivers. No device disable/update or online catalog. |
 | Disk Cleanup (cleanmgr.exe) | Not implemented. |
 | Disk Management | Not implemented. |
-| Event Viewer | Not implemented. |
+| Event Viewer | Shows the last 32 timestamped shell events; no persistent system or security log. |
 | Feedback Hub | Not implemented. |
 | File Explorer | Partial: Files launches the session note and canvas; Home commands manage named records. |
 | Films & TV (Movies & TV) | Not implemented. |
@@ -130,7 +130,7 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 | iSCSI Initiator | Not implemented. |
 | Journal (Microsoft Journal) | Not implemented. |
 | Local Security Policy | Not implemented. |
-| Magnifier | Not implemented. |
+| Magnifier | Pointer-following 2× lens (F9); no screen reader or remote display zoom. |
 | Malicious Software Removal Tool (MRT) | Not implemented. |
 | Media Player | Not implemented. |
 | Microsoft 365 Hub | Not implemented. |
@@ -140,11 +140,11 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 | Microsoft Solitaire Collection | Not implemented. |
 | Microsoft Store | Not implemented. |
 | Microsoft Teams | Not implemented. |
-| Microsoft To Do | Not implemented. |
+| Microsoft To Do | Local 12-item checklist with completion, paging and explicit Home save; no accounts or synchronization. |
 | Narrator | Not implemented. |
 | Notepad | Partial: plain-text Writer with persistent named notes on Fresh Home. |
 | ODBC Data Sources | Not implemented. |
-| On-Screen Keyboard | Not implemented. |
+| On-Screen Keyboard | F11 opens a clickable ASCII keyboard in supported text apps and the shell; no IME, credential entry or touchscreen driver. |
 | OneDrive | Not implemented. |
 | OneNote | Not implemented. |
 | Outlook for Windows (New) | Not implemented. |
@@ -160,14 +160,14 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 | Remote Desktop Connection (mstsc.exe) | Not implemented. |
 | Resource Monitor | Not implemented. |
 | Services | Not implemented. |
-| Snipping Tool | Not implemented. |
+| Snipping Tool | F10 captures a dragged rectangle as snip.bmp on writable Home. No recording or annotation. |
 | Sound Recorder | Not implemented. |
-| Sticky Notes | Not implemented. |
+| Sticky Notes | Three editable 240-byte cards; Ctrl+S saves the current card to Home. No cloud service. |
 | System Configuration (msconfig.exe) | Not implemented. |
 | System Information (msinfo32.exe) | Partial: native edition, boot mode and storage status. |
 | Task Manager | Partial: foreground/minimized app sessions; no Windows process or performance APIs. |
 | Task Scheduler | Not implemented. |
-| Tips | Not implemented. |
+| Tips | Six native offline guides; not a Microsoft content service. |
 | Weather (MSN Weather) | Not implemented. |
 | Windows Fax and Scan | Not implemented. |
 | Windows Features (OptionalFeatures.exe) | Not implemented. |
@@ -178,12 +178,14 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 
 ## Other requirements in the conversation
 
+See the [transcript audit](take-audit.md) for the original requests, line references and remaining gaps.
+
 | Area | Status |
 |---|---|
-| From-scratch kernel, BIOS/UEFI, three editions, media builder, Actions | Implemented; boot and installer tests are in `tools/smoke.py`. |
+| From-scratch kernel, BIOS/UEFI, four editions, media builder, Actions | Implemented; boot and installer tests are in `tools/smoke.py`. |
 | Default GUI, CLI desktop, keyboard restoration, customization | Implemented, with hardware and session limits in README. |
 | 8 GB media and low resource use | Exact capacity; most is a writable Home partition. BIOS smoke uses 32 MiB guest RAM. No comparison benchmark against Windows. |
-| Hardware installer and live mode | Prepared IDE target only, opt-in, verified copy, disk-only boot. No disk-formatting wizard for arbitrary drives. |
+| Hardware installer and live mode | Marked IDE, supported AHCI SATA or virtio-blk target only; opt-in, verified copy, disk-only boot. No disk-formatting wizard for arbitrary drives. |
 | Windows migration and NTFS | Offline copy of user-selected host files into a raw Home image only; no NTFS driver or automated migration. |
 | EXE installers, IMP compiler, arbitrary Linux apps | Partial: EXE→IMP1 linking and execution for supported PE32/PE32+ programs and selected Win32/CRT calls. Static x86-64 ELF loader and bounded Linux syscall subset; no general desktop Linux or EXE installer. |
 | Android apps | Removed by request. |

@@ -1,6 +1,7 @@
 #include "draw.h"
 #include "packages.h"
 #include "compat.h"
+#include "filetools.h"
 static u8 imported[IMP_LIMIT], converted[IMP_LIMIT];
 static PeResult pe_result;
 static int pe_ran, pe_ok, last_imp;
@@ -28,6 +29,12 @@ enum {
     TASKMGR,
     WINDOWS,
     CONNECTIONS,
+    STICKY,
+    TODO,
+    CHARMAP,
+    TIPS,
+    EVENTS,
+    CENTER,
     NAPPS
 };
 struct App {
@@ -46,7 +53,13 @@ static const struct App apps[] = {{"Files", "files", "F", 0xf2c443},
                                   {"Calendar", "calendar", "D", 0x6fd4bd},
                                   {"Tasks", "monitor", "T", 0xc2b7f1},
                                   {"Programs", "programs", "E", 0x60afe0},
-                                  {"Connections", "connections", "N", 0x63d5b3}};
+                                  {"Connections", "connections", "N", 0x63d5b3},
+                                  {"Stickies", "sticky", "P", 0xffec85},
+                                  {"To Do", "todo", "T", 0x65ceab},
+                                  {"Glyphs", "charmap", "A", 0x72a3ce},
+                                  {"Tips", "tips", "?", 0xcbd756},
+                                  {"Events", "events", "E", 0x67bbca},
+                                  {"Actions", "actions", "+", 0x81cba9}};
 static int welcome = 1, active = -1, hidden[NAPPS], menu, tray, choice, cli, shutdown, widget,
            wall, color, motion = !LITE, dim = 10, vol = 5, dirty = 1;
 static int wx = (W - 506) / 2, wy = (H - 311) / 2, dgx, dgy, drag, shift, caps, progress,
@@ -77,7 +90,7 @@ static char expr[32] = "0";
 static int acc, oper, fresh = 1;
 static int grid[64], seen[64], lost, won, cell, seeded;
 static u32 seed = 1;
-static void say(const char *s) {
+static void history_row(const char *s) {
     scroll = 0;
     if (rows == 96) {
         for (int i = 1; i < 96; i++)
@@ -85,6 +98,32 @@ static void say(const char *s) {
         rows--;
     }
     copy(history[rows++], s, 105);
+}
+/* Size scrollback rows for the narrower Terminal so no digest or command is clipped. */
+static void say(const char *s) {
+    do {
+        char row[105];
+        int n = 0, w = 0, gap = 0;
+        while (s[n] && s[n] != '\n' && n < 104) {
+            unsigned ch = (u8)s[n];
+            int adv = ch >= 32 && ch <= 126 ? fonts[0].adv[ch - 32] : 0;
+            if (w + adv > 454)
+                break;
+            if (s[n] == ' ')
+                gap = n + 1;
+            w += adv;
+            n++;
+        }
+        if (s[n] && s[n] != '\n' && gap)
+            n = gap;
+        for (int i = 0; i < n; i++)
+            row[i] = s[i];
+        row[n] = 0;
+        history_row(row);
+        s += n;
+        if (*s == '\n')
+            s++;
+    } while (*s);
 }
 static void clockread(void) {
     rtc(&year, &month, &day, &hour, &minute);
@@ -110,14 +149,27 @@ static void runprogram(const u8 *p, u32 n, int imp) {
                                               : "EXE to IMP32 completed\r\n"))
                : "Program rejected\r\n");
 }
+static int actions_from = -1;
+#define NDESKS 4
+static int desk, owner[NAPPS], foreground[NDESKS] = {-1, -1, -1, -1}, deskx[NDESKS],
+                               desky[NDESKS], overview, focusdesk, winheld, winused, osk;
 static void launch(int);
 #include "workspace.inc"
+#include "organizer.inc"
+#include "archive.inc"
+#include "alarms.inc"
 static void launch(int id) {
     if (id < 0 || id >= NAPPS)
         return;
+    if (id == CENTER && active != CENTER)
+        actions_from = active;
     if (active >= 0 && active != id)
         hidden[active] = 1;
+    if (owner[id] != desk && foreground[owner[id]] == id)
+        foreground[owner[id]] = -1;
+    owner[id] = desk;
     active = id;
+    log_event(apps[id].name);
     lift = motion ? 22 : 0;
     lift_speed = 0;
     hidden[id] = 0;
@@ -159,7 +211,7 @@ static void tasks(void) {
 }
 static int nth(int n) {
     for (int i = 0; i < NAPPS; i++)
-        if (hidden[i] && n-- == 0)
+        if (owner[i] == desk && hidden[i] && n-- == 0)
             return i;
     return -1;
 }
@@ -279,9 +331,8 @@ error:
 }
 static const char *saveprefs(void) {
     u8 prefs[] = {1, cli, wall, color, motion, dim, vol};
-    return home_save("profile", prefs, sizeof prefs)
-               ? "Settings saved."
-               : "Needs a writable Fresh Home disk.";
+    return home_save("profile", prefs, sizeof prefs) ? "Settings saved."
+                                                     : "Needs a writable Fresh Home disk.";
 }
 static void loadhome(void) {
     u8 p[7];
@@ -351,6 +402,7 @@ static int guest_save(const char *name, const void *data, u32 size) {
     dirty = 1;
     return consent && home_save(name, data, size);
 }
+static void task_view(void);
 static void command(void) {
     cmdpos = 0;
     scroll = 0;
@@ -370,6 +422,23 @@ static void command(void) {
     if (!*s)
         return;
     say(s);
+    if (eq(s, "desktops")) {
+        task_view();
+        return;
+    }
+    if (eq(s, "osk")) {
+        osk = !osk;
+        return;
+    }
+    if (clock_command(s) || archive_cmd(s))
+        return;
+    if (eq(s, "utilities")) {
+        say("sticky | todo | charmap | tips | events | actions | desktops | osk (F11)");
+        say("Clock: alarm HH:MM | timer SECONDS | alarm off | timer off");
+        say("F8 Quick actions | F9 Magnifier | F10 Snip | sha3 FILE | tar OUT.tar A B | gzip "
+            "OUT.gz A");
+        return;
+    }
     if (eq(s, "net") || eq(s, "net dhcp")) {
         network_cmd(eq(s, "net dhcp"), say);
         return;
@@ -386,7 +455,7 @@ static void command(void) {
         return;
     }
     if (eq(s, "uname") || eq(s, "ver")) {
-        say("FreshOS 1.2 / " EDITION " / native x86 kernel");
+        say("FreshOS 1.3 / " EDITION " / native x86 kernel");
         return;
     }
     if (eq(s, "dir"))
@@ -467,8 +536,10 @@ static void command(void) {
     if (eq(s, "start") || eq(s, "apps")) {
         say("START  |  Type an app name, then Enter.");
         say("files   writer   paint   calc   clock   settings   term   mines   system");
-        say("calendar   monitor   programs   /   convert NAME.exe   open NAME.imp");
+        say("calendar   monitor   programs   connections   sticky   todo   charmap");
+        say("tips   events   actions   /   desktops   osk   /   more: utilities");
     } else if (eq(s, "help")) {
+        say("utilities - new desktop tools, clipboard, archives and hashes");
         say("help keys | help drivers | lspci | ver | pwd | dir | cat FILE.txt | echo TEXT");
         say("start / apps   open NAME   tasks   resume NAME   clear   gui   cli");
         say("wall sky|lagoon|paint   color mint|ice|sun|white   time   cat note   storage");
@@ -492,7 +563,7 @@ static void command(void) {
     } else if (eq(s, "tasks")) {
         int any = 0;
         for (int i = 0; i < NAPPS; i++)
-            if (hidden[i]) {
+            if (owner[i] == desk && hidden[i]) {
                 say(apps[i].cmd);
                 any = 1;
             }
@@ -500,7 +571,7 @@ static void command(void) {
             say("No minimized apps.");
     } else if (prefix(s, "resume ")) {
         for (int i = 0; i < NAPPS; i++)
-            if (hidden[i] && eq(s + 7, apps[i].cmd)) {
+            if (owner[i] == desk && hidden[i] && eq(s + 7, apps[i].cmd)) {
                 launch(i);
                 return;
             }
@@ -561,9 +632,15 @@ static void icon(int x, int y, int i, int r) {
         sprite(GL_NETWORK, GL_NETWORK_W, GL_NETWORK_H, x, y, r, r, 1);
         return;
     }
+    if (i >= STICKY) {
+        static const u16 *const extra[] = {ICON12, ICON13, ICON14, ICON15, ICON16, ICON17};
+        sprite(extra[i - STICKY], 64, 64, x, y, r, r, 1);
+        return;
+    }
     sprite(glyphs[i], 64, 64, x, y, r, r, 1);
 }
 #include "desktop.inc"
+#include "workspaces.inc"
 static void bubble(int x, int y, int w, int h, u32 mid) {
     gel(x, y, w, h, h / 2, WHITE, mid, mix(mid, WHITE, 154));
     for (int j = 0; j < 13; j++)
@@ -586,7 +663,7 @@ static void startmenu(void) {
         icon(a + 8, b, i, 23);
         text(a - 4, b + 23, apps[i].name, 0, INK);
     }
-    text(184, 349, choice < 9 ? "More >" : "< Back", 0, INK);
+    text(184, 349, choice / 9 < (NAPPS - 1) / 9 ? "More >" : "< First", 0, INK);
     gel(164, 368, 18, 18, 9, WHITE, 0x485965, 0xb4f9b7);
     text(169, 368, "o", 0, WHITE);
     bubble(2, 100, 91, 61, 0x40f490);
@@ -615,7 +692,7 @@ static void console(int x, int y, int w, int h, int full) {
         start = stop > max ? stop - max : 0;
     for (int i = start; i < stop; i++) {
         char b[105];
-        copy(b, history[i], full ? 102 : 58);
+        copy(b, history[i], sizeof b);
         text(x + 16, y + 36 + (i - start) * 19, b, 0, tones[color]);
     }
     int yy = y + 39 + (stop - start) * 19;
@@ -715,6 +792,9 @@ static void wrapped(int x, int y, int width, const char *s) {
     }
 }
 #include "editors.inc"
+#include "utility_views.inc"
+#include "capture.inc"
+#include "keyboard.inc"
 static void window(void) {
     int x = wx, y = clamp(wy + lift, 0, H - 311), a = active;
     gel(x + 3, y + 6, 506, 311, 15, 0x769ca6, 0x637f8b, 0xa4bcc1);
@@ -725,6 +805,8 @@ static void window(void) {
     pill(x + 395, y + 3, 41, 21, "-", 0);
     pill(x + 450, y + 3, 41, 21, "x", 0);
     int xx = x + 19, yy = y + 45;
+    if (a >= STICKY)
+        utility_draw(a, xx, yy);
     if (a == WINDOWS) {
         text(xx, yy,
              last_imp == 2 ? "Linux application"
@@ -748,12 +830,12 @@ static void window(void) {
         calendar(xx, yy);
     if (a == TASKMGR) {
         text(xx, yy, "App sessions", 2, INK);
-        text(xx, yy + 38, "Tasks   /   Foreground", 1, INK);
+        text(xx, yy + 38, "Minimized on this desktop", 1, INK);
         int n = 0;
         for (int i = 0; i < NAPPS; i++)
-            if (hidden[i]) {
-                text(xx + (n / 6) * 215, yy + 73 + n % 6 * 24, apps[i].name, 1, INK);
-                text(xx + 96 + (n / 6) * 215, yy + 77 + n % 6 * 24, "Minimized", 0, INK);
+            if (owner[i] == desk && hidden[i]) {
+                text(xx + (n / 6) * 151, yy + 73 + n % 6 * 24, apps[i].name, 1, INK);
+
                 n++;
             }
         if (!n)
@@ -846,7 +928,7 @@ static void window(void) {
         num(b, year);
         int end = text(xx, yy + 85, b, 1, INK);
         text(end + 8, yy + 85, date, 1, INK);
-        text(xx, yy + 133, "Time comes from the PC real-time clock.", 1, INK);
+        clock_details(xx, yy + 134);
     }
     if (a == MINES) {
         for (int i = 0; i < 64; i++) {
@@ -962,8 +1044,18 @@ static void render(void) {
             pill(x + 180, y + 139, 110, 30, "Deny", 0);
         pill(x + 304, y + 139, 110, 30, modal == 2 ? "Allow / Y" : "OK", 1);
     }
+    if (kb_visible())
+        keyboard_draw();
+    if (overview)
+        workspace_draw();
+    if (magnify && !secret && !snipping && !modal)
+        lens();
+    if (snipping)
+        capture_overlay();
     present();
-    cursor_present(modal || welcome || setup || !cli || active >= 0, 1);
+    cursor_present(snipping || overview || kb_visible() || modal || welcome || setup ||
+                       !cli || active >= 0,
+                   1);
 }
 static void sound(void);
 static void setting(int i) {
@@ -993,10 +1085,23 @@ static int inside(int x, int y, int a, int b, int w, int h) {
     return x >= a && x < a + w && y >= b && y < b + h;
 }
 void pointer(int old, int x, int y) {
-    if (cli && active < 0 && !setup && !welcome && !pending_doc[0] && !modal)
+    if (cli && active < 0 && !snipping && !magnify && !osk && !overview && !setup &&
+        !welcome && !pending_doc[0] && !modal)
         return;
     if (secret)
         return;
+    if (snipping) {
+        dirty = 1;
+        if (snipping == 1 && (buttons & 1) && !(old & 1)) {
+            sx = x;
+            sy = y;
+            snipping = 2;
+        } else if (snipping == 2 && !(buttons & 1))
+            save_snip(x, y);
+        return;
+    }
+    if (magnify)
+        dirty = 1;
     static int prevdock = -2;
     int current = (dock_at(x, y) + 1) * 64 + hovered(x, y);
     if (!(buttons & 1) && !(old & 1) && prevdock == current) {
@@ -1017,6 +1122,19 @@ void pointer(int old, int x, int y) {
         }
         return;
     }
+    if (overview) {
+        if (click) {
+            for (int i = 0; i < 4; i++)
+                if (inside(x, y, W / 2 - 278 + 141 * i, H / 2 - 33, 132, 104)) {
+                    switch_desk(i);
+                    return;
+                }
+            overview = 0;
+        }
+        return;
+    }
+    if (kb_visible() && keyboard_click(x, y, click))
+        return;
     if (pending_doc[0]) {
         if (click && inside(x, y, 345, 299, 112, 30))
             discard_choice(0);
@@ -1096,7 +1214,9 @@ void pointer(int old, int x, int y) {
     }
     if (menu && click) {
         if (inside(x, y, 175, 342, 62, 25)) {
-            choice = choice < 9 ? 9 : 0;
+            choice = (choice / 9 + 1) * 9;
+            if (choice >= NAPPS)
+                choice = 0;
             return;
         }
         for (int i = choice / 9 * 9; i < NAPPS && i < choice / 9 * 9 + 9; i++)
@@ -1166,6 +1286,8 @@ void pointer(int old, int x, int y) {
         return;
     }
     if (!click)
+        return;
+    if (utility_click(active, a, b))
         return;
     if (active == CONNECTIONS) {
         if (inside(a, b, 320, 35, 135, 30))
@@ -1265,6 +1387,23 @@ void key(int k, int down) {
         shift = down;
         return;
     }
+    if (k == 347 || k == 348) {
+        if (modal || secret || welcome || setup || savebox || pending_doc[0] || shutdown ||
+            snipping) {
+            winheld = 0;
+            return;
+        }
+        if (down) {
+            if (!winheld)
+                winused = 0;
+            winheld = 1;
+        } else {
+            if (winheld && !winused)
+                tasks();
+            winheld = 0;
+        }
+        return;
+    }
     if (!down)
         return;
     if (modal) {
@@ -1349,6 +1488,51 @@ void key(int k, int down) {
         shutdown = 0;
         return;
     }
+    if (snipping) {
+        if (k == 1)
+            snipping = 0;
+        return;
+    }
+    if (winheld) {
+        winused = 1;
+        if (k == 15) {
+            task_view();
+            return;
+        }
+        if (ctrl && (k == 331 || k == 333)) {
+            switch_desk((desk + 4 + (k == 331 ? -1 : 1)) % 4);
+            return;
+        }
+        if (k == 30) {
+            launch(CENTER);
+            return;
+        }
+    }
+    if (overview) {
+        if (k == 331 || k == 333 || k == 15)
+            focusdesk = (focusdesk + 4 + (k == 331 ? -1 : 1)) % 4;
+        if (k == 28)
+            switch_desk(focusdesk);
+        if (k == 1)
+            overview = 0;
+        return;
+    }
+    if (k == 87) {
+        osk = !osk;
+        return;
+    }
+    if (k == 66) {
+        launch(CENTER);
+        return;
+    }
+    if (k == 67) {
+        magnify = !magnify;
+        return;
+    }
+    if (k == 68) {
+        quick_action(5);
+        return;
+    }
     if (k == 58) {
         caps = !caps;
         return;
@@ -1357,7 +1541,7 @@ void key(int k, int down) {
         cli_set(!cli);
         return;
     }
-    if (k == 60 || k == 347 || k == 348) {
+    if (k == 60) {
         tasks();
         return;
     }
@@ -1436,7 +1620,17 @@ void key(int k, int down) {
         c -= 32;
     else if (caps && c >= 'A' && c <= 'Z')
         c += 32;
+    if (utility_key(active, k, c))
+        return;
     if (active == TERM || (active < 0 && cli)) {
+        if (ctrl && k == 47) {
+            paste(line, sizeof line, &cmdpos, 0);
+            return;
+        }
+        if (ctrl && shift && k == 46) {
+            copy(clip, line, sizeof clip);
+            return;
+        }
         if (ctrl && (k == 38 || k == 46)) {
             if (k == 38)
                 rows = scroll = 0;
@@ -1549,6 +1743,10 @@ static void sound(void) {
         silence();
 }
 void main(void) {
+    for (int i = 0; i < 4; i++) {
+        deskx[i] = wx;
+        desky[i] = wy;
+    }
     hw_init();
     clockread();
     for (int j = 0; j < 198; j++)
@@ -1558,6 +1756,8 @@ void main(void) {
     guest_save_service(guest_save);
     drivers_init();
     storage_init();
+    organizer_load();
+    log_event("Desktop initialized");
     if (home_ready())
         loadhome();
     newgame();
@@ -1581,7 +1781,8 @@ void main(void) {
             int before = minute;
             clockread();
             clocktick = now;
-            if (before != minute || active == CONNECTIONS)
+            alarm_tick(now);
+            if (before != minute || active == CONNECTIONS || active == CLOCK)
                 dirty = 1;
         }
         if (now != last) {
@@ -1623,7 +1824,9 @@ void main(void) {
                 dirty = 0;
                 render();
             } else
-                cursor_present(welcome || setup || !cli || active >= 0, 0);
+                cursor_present(snipping || overview || kb_visible() || welcome || setup ||
+                                   !cli || active >= 0,
+                               0);
         }
         __asm__ volatile("hlt");
     }

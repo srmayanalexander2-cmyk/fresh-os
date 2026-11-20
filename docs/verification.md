@@ -1,6 +1,14 @@
-# FreshOS 1.2 verification · 2026-11-20
+# FreshOS 1.3 verification · 2026-11-20
 
-These results apply to the four **1.2** ISO archives in `releases/`, not a web implementation of the desktop. Older results remain in their release tags. The VM and protocol fixtures below do not establish hardware compatibility with an arbitrary PC.
+* **Native media:** All four editions passed `tools/check.py` and booted in QEMU under legacy BIOS and x64 UEFI. VMware Lite passed `--install` under both, including disk-only reboot and persisted document checks. The Normal optical payload also booted in the v86 browser preview.
+* **New utility checks:** `QEMU_BIN=… python tests/utilities.py out/FreshOS-VMware-Lite.iso` drives the guest with keyboard and pointer input and reads the resulting Home disk independently. The test switched desktops with a note open, pasted into a checklist on the other desktop, returned to the note, clicked an on-screen key and rebooted to verify both documents could be edited again. It checked a magnifier region against the source pixels, reordered a quick action and invoked it, opened Writer from Tips, received a countdown alert, decoded a 26×32 BMP, opened a two-member tar and decompressed a gzip file. [Task View](screens/task-view.jpg) · [Actions](screens/actions.jpg) · [Magnifier](screens/magnifier.jpg)
+* **Algorithm checks:** `python tests/filetools.py` compiled the guest's actual file-tool code on the host and compared its results with `hashlib`, `tarfile` and `gzip`, including empty files and SHA3 rate, tar-sector and DEFLATE block boundaries.
+* **Regression checks:** Five host compatibility groups, the mouse-driven desktop and VMware pointer tests, and the BIOS virtio / UEFI SATA device fixtures passed. These are emulator/protocol tests, not physical Wi-Fi, Bluetooth, VMware Workstation or Windows compatibility certification.
+* **Downloads:** Four ZIP64 archives with expanded-ISO SHA-256 files are in `releases/`. The workspace packages are 1.3; the historical results below are for 1.2 only.
+
+## FreshOS 1.2 verification · 2026-11-20
+
+These results apply to the four **1.2** ISO archives at tag `v1.2.0`, not a web implementation of the desktop. Older results remain in their release tags. The VM and protocol fixtures below do not establish hardware compatibility with an arbitrary PC.
 
 | Check on final media | What actually happened |
 |---|---|

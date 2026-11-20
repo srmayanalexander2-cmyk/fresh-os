@@ -6,7 +6,7 @@ import math
 
 def atlas():
     icons = []
-    for n in range(12):
+    for n in range(18):
         im = Image.new("RGB", (64, 64), (255, 0, 255))
         d = ImageDraw.Draw(im)
 
@@ -128,6 +128,39 @@ def atlas():
                 fill="#b7ff97",
                 width=3,
             )
+        if n >= 12:
+            tint = [
+                (249, 197, 76),
+                (59, 166, 128),
+                (90, 141, 192),
+                (233, 182, 65),
+                (96, 147, 160),
+                (77, 172, 185),
+            ][n - 12]
+            panel((6, 5, 58, 58), 9, tuple(min(255, c + 68) for c in tint), tint)
+            ink = "#184857"
+            if n == 12:
+                d.polygon([(42, 55), (54, 42), (42, 42)], fill="white")
+                d.line((15, 22, 45, 22), fill=ink, width=3)
+                d.line((15, 31, 37, 31), fill=ink, width=3)
+            if n == 13:
+                for y in (18, 32, 46):
+                    d.line([(13, y), (17, y + 4), (23, y - 4)], fill="white", width=3)
+                    d.line((29, y, 49, y), fill=ink, width=3)
+            if n == 14:
+                d.line([(16, 45), (31, 15), (46, 45)], fill="white", width=4)
+                d.line((23, 34, 39, 34), fill="white", width=4)
+            if n == 15:
+                d.ellipse((19, 13, 45, 39), fill="#fffacc", outline=ink, width=2)
+                d.rectangle((26, 37, 38, 46), fill=ink)
+            if n == 16:
+                for y in (19, 31, 43):
+                    d.ellipse((14, y, 19, y + 5), fill="white")
+                    d.line((25, y + 2, 48, y + 2), fill=ink, width=3)
+            if n == 17:
+                for y, x in [(20, 35), (32, 23), (44, 40)]:
+                    d.line((14, y, 50, y), fill=ink, width=3)
+                    d.ellipse((x - 4, y - 4, x + 4, y + 4), fill="white")
         icons.append(im)
     dst = Image.new("RGB", (64 * len(icons), 64))
     for i, v in enumerate(icons):

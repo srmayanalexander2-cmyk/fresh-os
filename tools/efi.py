@@ -72,6 +72,7 @@ def efi(build, edition):
         ROOT / "kernel/platform.c",
         ROOT / "kernel/shell.c",
         ROOT / "kernel/storage.c",
+        ROOT / "kernel/filetools.c",
         ROOT / "kernel/drivers.c",
         ROOT / "kernel/memory.c",
         ROOT / "kernel/pe.c",

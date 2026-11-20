@@ -76,6 +76,17 @@ static void writer_draw(int x, int y) {
 static void writer_key(int k, char c) {
     int n = len(note);
     layout_note();
+    if (ctrl && k == 46) {
+        copy(clip, note, sizeof clip);
+        notify("Document copied.");
+        return;
+    }
+    if (ctrl && k == 47) {
+        paste(note, sizeof note, &editpos, 1);
+        if (n != len(note))
+            modified = 1;
+        return;
+    }
     if (ctrl && shift && k == 31) {
         savebox = 1;
         savename[0] = 0;
