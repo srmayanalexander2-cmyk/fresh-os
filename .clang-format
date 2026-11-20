@@ -1,0 +1,4 @@
+BasedOnStyle: LLVM
+ColumnLimit: 94
+IndentWidth: 4
+SortIncludes: Never

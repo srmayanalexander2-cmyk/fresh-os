@@ -1,0 +1,305 @@
+Windows 10 (Version 1507) Features:
+
+Hybrid Start Menu (combined traditional list with resizable Live Tiles)
+
+Continuum (automatic/manual tablet mode switch)
+
+Task View and Virtual Desktops (Win + Tab)
+
+Snap Assist & Quadrant Snapping (2x2 window snapping)
+
+Action Center & Quick Actions sidebar
+
+Universal Windows Platform (UWP) app architecture
+
+Quick Access File Explorer view
+
+Unified Settings App
+
+Windows Hello (biometric fingerprint and IR facial recognition)
+
+Microsoft Passport / Windows Hello for Business (cryptographic key authentication)
+
+Device Guard & Credential Guard
+
+Windows Defender Antivirus (built-in real-time anti-malware)
+
+DirectX 12 low-level graphics API
+
+Game DVR & Game Bar (Win + G)
+
+Windows Update for Business & Peer-to-Peer update sharing
+
+Command Prompt enhancements (Ctrl + C/Ctrl + V, word wrap)
+
+Native MKV, FLAC, and HEVC codec support
+
+Windows 11 (Version 24H2) Features:
+
+Scrollable Quick Settings flyout with reorderable toggles
+
+File Explorer context menu text labels beneath top-row icons
+
+Native 7-Zip and TAR archive creation (.7z, .tar, .gz, .bz2, .xz, .zst)
+
+Energy Saver mode (for both laptops and desktops)
+
+Content Adaptive Brightness Control (CABC) on AC power
+
+Voice Clarity (echo cancellation and noise suppression)
+
+Phone Link Start Menu companion panel
+
+HDR .jxr background wallpaper support
+
+Wi-Fi 7 (802.11be) native support
+
+Bluetooth LE Audio & hearing aid controls
+
+Sudo for Windows (CLI privilege elevation)
+
+Rust memory-safety rewrites in the Windows kernel
+
+Prism Emulator for Arm64 application translation
+
+Enterprise Hotpatching (zero-reboot monthly security updates)
+
+Remote Desktop high-DPI scaling and zoom up to 500%
+
+Power Grid Forecast API
+
+Windows Protected Print Mode (driverless Mopria printing)
+
+Personal Data Encryption (PDE) for folder-level security
+
+Local Security Authority (LSA) protection enabled by default
+
+SHA-3 cryptographic support
+
+App Control for Business (WDAC enhancements)
+
+Windows LAPS automated local admin account management
+
+Wi-Fi network list privacy controls
+
+SMB over QUIC client controls & NTLM hardening
+
+Windows 11 (Version 25H2) Features:
+
+Redesigned single-page scrollable Start Menu (unified Pinned, Recommended, and grid All Apps list)
+
+Dynamic taskbar icon resizing
+
+Color-coded battery status icon with inline percentage toggle
+
+Quick Machine Recovery (QMR) cloud-connected WinRE recovery
+
+Administrator Protection (zero-trust standard user token elevation via Windows Hello)
+
+Task Manager RAM speed reporting in MT/s and faster process handle release
+
+Lock Screen widget customization (add, remove, rearrange status cards)
+
+Windows Share drag-and-drop top edge tray
+
+Third-party Passkey Manager integration into Windows Hello API
+
+Policy-based store app removal (RemoveDefaultMicrosoftStorePackages)
+
+Windows Backup for Organizations
+
+Wi-Fi 7 Enterprise access point support (WPA3-Enterprise / 802.1X)
+
+Scrapped, Removed, or Deprecated Features:
+
+Windows Media Center
+
+Native DVD playback codecs in Windows Media Player
+
+Desktop Gadgets & Sidebar
+
+Classic Windows 7 games (Solitaire, Minesweeper, Hearts)
+
+OneDrive smart file placeholders (1507 version)
+
+Built-in USB floppy drive plug-and-play drivers
+
+Home Edition manual update deferral controls
+
+Bing Food & Drink, Health & Fitness, and Travel apps
+
+WordPad
+
+Cortana app
+
+Legacy Mail, Calendar, and People apps
+
+Windows Mixed Reality portal & SteamVR integration
+
+NTLMv1 authentication protocol
+
+AllJoyn IoT framework
+
+Steps Recorder
+
+Windows Speech Recognition
+
+DirectAccess, Computer Browser, Remote Mailslots, and WebDAV/WebClient service
+
+POPCNT and SSE4.2 CPU check enforcement (blocking older legacy CPUs)
+
+Windows PowerShell 2.0
+
+WMIC (Windows Management Instrumentation Command-line)
+
+Location History API
+
+Windows Maps & Movies & TV (removed from clean 25H2 installs)
+
+Tips app
+
+32-bit ARM (ARM32) UWP app support
+
+VBScript (disabled by default)
+
+TLS 1.0 & 1.1 protocols (disabled by default)
+
+Microsoft Defender Application Guard for Office
+
+Microsoft Support Diagnostic Tool (MSDT)
+
+Built-In Apps & Utilities:
+
+Alarms & Clock
+
+App Installer
+
+Calculator
+
+Camera
+
+Character Map
+
+Clipchamp
+
+Component Services
+
+Computer Management
+
+Control Panel
+
+Defragment and Optimize Drives
+
+Device Manager
+
+Disk Cleanup (cleanmgr.exe)
+
+Disk Management
+
+Event Viewer
+
+Feedback Hub
+
+File Explorer
+
+Films & TV (Movies & TV)
+
+Game Bar (Xbox Game Bar)
+
+Get Help
+
+iSCSI Initiator
+
+Journal (Microsoft Journal)
+
+Local Security Policy
+
+Magnifier
+
+Malicious Software Removal Tool (MRT)
+
+Media Player
+
+Microsoft 365 Hub
+
+Microsoft Family
+
+Microsoft Management Console (mmc.exe)
+
+Microsoft News (MSN News)
+
+Microsoft Solitaire Collection
+
+Microsoft Store
+
+Microsoft Teams
+
+Microsoft To Do
+
+Narrator
+
+Notepad
+
+ODBC Data Sources
+
+On-Screen Keyboard
+
+OneDrive
+
+OneNote
+
+Outlook for Windows (New)
+
+Paint
+
+Performance Monitor
+
+Phone Link
+
+Power Automate
+
+PowerShell 5.1
+
+Print Management
+
+Quick Assist
+
+Recovery Drive
+
+Registry Editor (regedit.exe)
+
+Remote Desktop Connection (mstsc.exe)
+
+Resource Monitor
+
+Services
+
+Snipping Tool
+
+Sound Recorder
+
+Sticky Notes
+
+System Configuration (msconfig.exe)
+
+System Information (msinfo32.exe)
+
+Task Manager
+
+Task Scheduler
+
+Tips
+
+Weather (MSN Weather)
+
+Windows Fax and Scan
+
+Windows Features (OptionalFeatures.exe)
+
+Windows Media Player Legacy
+
+Windows Memory Diagnostic
+
+Windows Sandbox
+
+Xbox

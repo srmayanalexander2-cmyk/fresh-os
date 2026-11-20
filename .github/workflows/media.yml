@@ -1,0 +1,39 @@
+name: Build FreshOS media
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['boot/**', 'kernel/**', 'tools/**', 'examples/**', 'tests/**', 'assets/**', 'requirements.txt', '.github/workflows/media.yml']
+permissions:
+  contents: read
+jobs:
+  native-media:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [Normal, Lite, VMware]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build and test tools (not guest payload)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends binutils build-essential fonts-dejavu-core qemu-system-x86 ovmf
+          python -m pip install -r requirements.txt
+      - run: python tests/test_compat.py -v
+      - run: python tools/build.py ${{ matrix.edition }}
+      - run: python tools/check.py out/FreshOS-${{ matrix.edition }}.iso
+      - run: python tools/smoke.py out/FreshOS-${{ matrix.edition }}.iso
+      - name: UEFI boot and interaction
+        run: python tools/smoke.py out/FreshOS-${{ matrix.edition }}.iso --uefi ${{ matrix.edition == 'Normal' && '--install' || '' }}
+      - run: python tools/package.py ${{ matrix.edition }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FreshOS-${{ matrix.edition }}-media
+          path: |
+            releases/FreshOS-${{ matrix.edition }}.zip
+            releases/FreshOS-${{ matrix.edition }}.sha256
+          compression-level: 0

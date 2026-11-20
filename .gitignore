@@ -1,0 +1,10 @@
+/build/
+/out/
+.preview/
+__pycache__/
+*.pyc
+examples/android/build/
+
+# Large install-media downloads are published as GitHub release assets.
+/releases/*.zip
+/releases/*.tmp
