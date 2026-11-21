@@ -1,12 +1,14 @@
 # FreshOS 2 · Stratus
 
-A clean-slate native x86 system. Stratus is a new kernel and desktop, not a skin on FreshOS 1.x, Linux or a web page. Only the supplied visual artwork and font license carry over. The [1.5 release](https://github.com/srmayanalexander2-cmyk/fresh-os/releases/tag/v1.5.0) remains available for older software. **Home disks are not interchangeable.** This is a development release, not a feature-compatible upgrade.
+A clean-slate native x86 system. Stratus is a new kernel and desktop, not a skin on FreshOS 1.x, Linux or a web page. The bounded x86 interpreter is adapted from 1.5; the kernel remains native. The [1.5 release](https://github.com/srmayanalexander2-cmyk/fresh-os/releases/tag/v1.5.0) remains available for older software. **Home disks are not interchangeable.** This is a development release, not a feature-compatible upgrade.
 
-[Download the four preview editions on GitHub](https://github.com/srmayanalexander2-cmyk/fresh-os/releases/tag/v2.0.0-preview.1) · [Test results and guest screenshots](docs/verification.md)
+[Preview 2 downloads: ISOs, VM bundles and checksums](https://github.com/srmayanalexander2-cmyk/fresh-os/releases/tag/v2.0.0-preview.2) · [Test results and guest screenshots](docs/verification.md)
+
+**Preview 2 bundles:** [Normal](distros/FreshOS-Normal.zip) · [Lite](distros/FreshOS-Lite.zip) · [VMware](distros/FreshOS-VMware.zip) · [VMware Lite](distros/FreshOS-VMware-Lite.zip). These builds include the reference-style shell, [IMP2 packages](docs/imp.md) and [native x64 processes](docs/native-processes.md). The preview 1 release does not.
 
 ## Boot a VM
 
-Extract one ZIP. Boot its ISO as an **optical disc**. BIOS runs the 32-bit kernel; x64 UEFI runs the 64-bit kernel (disable Secure Boot). VMware packages include a VMX: extract the whole ZIP to a writable directory, then open `FreshOS.vmx`. **To install:** open System → Install to Home disk → Confirm Install, or type `install` in Terminal and press **I** on the System confirmation page. Wait for “Install verified”, shut down the VM, detach the CD and boot the disk. Before installation, `Home.img` is only a data disk. Do not attach irreplaceable data or physical disks.
+Extract one ZIP. Boot its ISO as an **optical disc**. BIOS runs the 32-bit kernel; x64 UEFI runs the 64-bit kernel (disable Secure Boot). VMware packages include a VMX: extract the whole ZIP to a writable directory, then open **`FreshOS-x64.vmx` for native x64 applications** or `FreshOS.vmx` for legacy BIOS. The two profiles share one disk: never run them simultaneously. **To install:** open System → Install to Home disk → Confirm Install, or type `install` in Terminal and press **I** on the System confirmation page. Wait for “Install verified”, shut down the VM, detach the CD and boot the disk. Before installation, `Home.img` is only a data disk. Do not attach irreplaceable data or physical disks.
 
 | Edition | Display selection | VM package |
 |---|---|---|
@@ -17,25 +19,27 @@ Extract one ZIP. Boot its ISO as an **optical disc**. BIOS runs the 32-bit kerne
 
 Example: `qemu-system-x86_64 -m 96 -cdrom FreshOS-Normal.iso -drive file=Home.img,format=raw,if=ide,index=0 -boot d`. Without the data disk, the desktop works in memory; documents disappear after power-off.
 
+**Try an actual Windows program:** On x64 UEFI with the included Home disk, press F3, enter `install cal64`, then `run cal64 2 2024`. This is a third-party PE executable, not a built-in calendar command.
+
 ## Use the desktop
 
-* Click Start or press **F1**; select an app with arrows and Enter. The dock switches sessions. **F3** opens Terminal; `exit` or **Esc** returns to the desktop. `Hide` keeps the app's contents.
+* Click **Use OS** or press Enter. Click the green arrow on the left rail or press **F1**; select an app with arrows and Enter. The smile on the rail opens IMP Library. The speaker opens a volume bubble; click its title to switch to brightness. **F3** opens Terminal; `exit` or **Esc** returns to the desktop. `Hide` keeps the app's contents.
 * **Max** uses the work area without covering the dock. Drag a window by its title bar. **F11** (or Full) gives the app the entire framebuffer; press it again or click Restore. Layout is recomputed from native screen bounds. No scaled screenshot or fixed-size canvas stretched under the controls.
 * **Files** browses Home documents; select and Open or double-click. **Ctrl+N** creates a new note. With more width, Files adds a preview, Writer shows a document rail, Calculator puts the result beside its keypad, and Settings splits into columns. Sketch uses normalized coordinates so drawings survive resizing; its bitmap is session-only.
 * **Writer**: type, Enter, arrow keys, mouse caret placement, Home/End, Backspace/Delete, PgUp/PgDn. **Ctrl+S** saves, **Ctrl+C** copies the document, **Ctrl+V** pastes, **Ctrl+R** reverts the draft to its session copy. Switching apps does not discard a draft. Opening a different document with unsaved edits is blocked.
 * **Calculator** supports signed 32-bit integer arithmetic, parentheses and precedence; overflow and division by zero report errors. **Clock** reads the hardware clock, runs a countdown and shows a navigable month calendar when the window has room. **Settings** controls software brightness, feedback pitch/silence, accent, wallpaper, dock auto-hide and whether new apps start maximized. On narrow screens switch between Controls and Workspace; choose Save preferences to Home for persistence.
-* **Terminal**: `help`, `apps`, `open NAME`, `ls`/`dir`, `cat FILE`/`type FILE`, `edit FILE`, `new FILE`, `save`, `calc EXPR`, `echo TEXT`, `uptime`, `disks`, `lspci`/`drivers`, `install`, `ver`/`uname`, `clear`/`cls`, `exit`. Up recalls the previous command. These are native commands, not a Windows/Linux command interpreter.
+* **Terminal**: `help`, `apps`, `packages`, `run NAME [ARGS...]`, `install NAME`, `runfile PATH [ARGS...]` (UEFI app disk), `open NAME`, `ls`/`dir`, `cat FILE`/`type FILE`, `edit FILE`, `new FILE`, `save`, `calc EXPR`, `echo TEXT`, `uptime`, `disks`, `lspci`/`drivers`, `install`, `ver`/`uname`, `clear`/`cls`, `exit`. Up recalls the previous command. These are native commands, not a Windows/Linux command interpreter.
 
 ## Kernel and data boundaries
 
-BIOS uses an El Torito loader and VBE; EFI negotiates GOP and exits firmware boot services. Stratus validates the display handoff, installs its own exception table, drives a 60 Hz PIT and polls a bounded PS/2 input queue. CPU faults halt with a framebuffer and COM1 report. On a detected VMware display it also negotiates the absolute-pointer protocol. `lspci` reads PCI IDs; listing a controller does not mean there is a driver for it. The desktop composites into its own buffer; pointer-only movement restores a small cursor region rather than repainting every app.
+BIOS uses an El Torito loader and VBE; EFI negotiates GOP and exits firmware boot services. Stratus validates the display handoff, installs its own exception table, drives a 60 Hz PIT and polls a bounded PS/2 input queue. Kernel CPU faults halt with a framebuffer and COM1 report. On a detected VMware display it also negotiates the absolute-pointer protocol. `lspci` reads PCI IDs; listing a controller does not mean there is a driver for it. The desktop composites into its own buffer; pointer-only movement restores a small cursor region rather than repainting every app.
 
 The installer verifies the copied system sectors from the ATAPI CD, preserves the separate Home area, and publishes the bootable MBR last. It refuses unmarked and already-installed targets. This is not an in-place upgrade tool; the compact ISO is for optical boot.
 
-Home-2 accepts only its own marked ATA/IDE medium. A save writes an inactive snapshot, flushes, then publishes its generation and checksum. Boot verifies snapshots and selects the newest valid copy. Limit: 16 text documents, 3,071 ASCII bytes each. This is a small document store, not a general filesystem. The kernel has one address space; app sessions are not isolated processes.
+Home-2 accepts only its own marked ATA/IDE medium. A save writes an inactive snapshot, flushes, then publishes its generation and checksum. Boot verifies snapshots and selects the newest valid copy. Limit: 16 text documents, 3,071 ASCII bytes each. This is a small document store, not a general filesystem. Built-in desktop sessions share the kernel address space. On supported x64 UEFI machines, external x64 packages run at CPL3 with a separate page-table root.
 
-**No Aero Browser, Chrome or fake Chrome launcher.** Google Chrome's Linux binary cannot execute on this native kernel. There is no POSIX/Linux process ABI, network stack, TLS client, accelerator driver, package runtime or general application loader. Many 1.x features (including the IMP runner, broad utility set and network/storage drivers) are absent by design in this first rewrite. This is not a general-purpose OS or a drop-in replacement for Windows.
+**No Aero Browser or Chrome.** On x64 UEFI, supported 32- and 64-bit packages execute synchronously using the CPU. The legacy BIOS backend uses the bounded interpreter. Windows and Linux subsets, supported sample programs and missing services are documented in [IMP2 on Stratus](docs/imp.md). This is not a drop-in replacement for either OS.
 
 ## Build
 
-On Linux with GCC, GNU binutils (including the `i386pep` linker emulation), DejaVu Sans and Python, install `requirements.txt`, then run `python forge/media.py all`. No host libc is linked into either kernel. Output: `distros/FreshOS-{Normal,Lite,VMware,VMware-Lite}.zip`. The `.sha256` checks the extracted ISO; the same digest is inside each ZIP. The compact optical images are about 5–6 MiB, not padded to 8 GB. Graphics are rasterized at build time; the guest depends on no host windowing system.
+On Linux with GCC, GNU binutils (including the `i386pep` linker emulation), DejaVu Sans and Python, install `requirements.txt`, then run `python forge/media.py all`. No host libc is linked into either kernel. Output: `distros/FreshOS-{Normal,Lite,VMware,VMware-Lite}.zip`. The `.sha256` checks the extracted ISO; the same digest is inside each ZIP. The compact optical images are under 10 MiB, not padded to 8 GB. Graphics are rasterized at build time; the guest depends on no host windowing system.

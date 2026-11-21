@@ -5,6 +5,7 @@ import argparse, hashlib, io, struct, subprocess, zipfile
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import pycdlib
+from sample_packages import seed
 
 ROOT = Path(__file__).resolve().parents[1]
 EDITIONS = ("Normal", "Lite", "VMware", "VMware-Lite")
@@ -25,7 +26,7 @@ def assets(d, lite):
     widths = []
     heights = []
     advs = []
-    for size, bold in [(12, False), (15, False), (26, True)]:
+    for size, bold in [(12, False), (15, False), (26, True), (46, True)]:
         font = ImageFont.truetype(
             "DejaVuSans" + ("-Bold" if bold else "") + ".ttf", size
         )
@@ -112,8 +113,31 @@ def assets(d, lite):
     def arr(t, n, values):
         return f"static const {t} {n}[]={{" + ",".join(map(str, values)) + "};\n"
 
+    shell_offsets, shell_w, shell_h = [], [], []
+    for key in ["rail", "rail-open", "disc", "tray", "sound", "light"]:
+        im = Image.open(ROOT / f"assets/shell/{key}.png").convert("RGBA")
+        shell_offsets.append(len(raw))
+        shell_w.append(im.width)
+        shell_h.append(im.height)
+        raw.extend(im.tobytes())
+    welcome_off = len(raw)
+    welcome = (
+        Image.open(ROOT / "assets/shell/welcome.webp")
+        .convert("RGB")
+        .resize((640, 360) if lite else (960, 540))
+    )
+    raw.extend(
+        b"".join(
+            struct.pack("<H", (r >> 3) << 11 | (g >> 2) << 5 | b >> 3)
+            for r, g, b in welcome.get_flattened_data()
+        )
+    )
     (d / "atlas.h").write_text(
         f"#define SKY_W {wh[0]}\n#define SKY_H {wh[1]}\n#define ICON_OFFSET {icons}\n"
+        + f"#define WELCOME_OFF {welcome_off}\n#define WELCOME_W {welcome.width}\n#define WELCOME_H {welcome.height}\n"
+        + arr("int", "shell_off", shell_offsets)
+        + arr("int", "shell_w", shell_w)
+        + arr("int", "shell_h", shell_h)
         + arr("int", "font_off", offsets)
         + arr("int", "font_w", widths)
         + arr("int", "font_h", heights)
@@ -197,14 +221,16 @@ def build(e):
         f"-DTARGET_W={w}",
         f"-DTARGET_H={h}",
         "-I.",
-        *["-I" + str(src / f) for f in ("core", "hal", "desktop")],
+        *["-I" + str(src / f) for f in ("core", "hal", "desktop", "compat")],
     ]
     common = [
         *sorted((src / "core").glob("*.c")),
         *sorted((src / "hal").glob("*.c")),
         src / "hal/faults.S",
+        *sorted((src / "compat").glob("*.c")),
         *sorted((src / "desktop").glob("*.c")),
         src / "arch/enter.S",
+        src / "arch/usermode.S",
         d / "media.S",
     ]
     for bits in (32, 64):
@@ -355,12 +381,20 @@ def build(e):
         f.seek(40960 * 512)
         f.write(marker)
         f.truncate(32 * 1024 * 1024)
+    seed(d)
     if vm:
         (d / "Home.vmdk").write_text(
             '# Disk DescriptorFile\nversion=1\nencoding="UTF-8"\nCID=21000001\nparentCID=ffffffff\ncreateType="monolithicFlat"\nRW 65536 FLAT "Home.img" 0\nddb.adapterType="ide"\nddb.geometry.cylinders="64"\nddb.geometry.heads="16"\nddb.geometry.sectors="64"\n'
         )
         (d / "FreshOS.vmx").write_text(
             f'.encoding = "UTF-8"\nconfig.version = "8"\nvirtualHW.version = "14"\ndisplayName = "FreshOS 2 - {e}"\nguestOS = "other"\nmemsize = "{32 if lite else 96}"\nfirmware = "bios"\nide0:0.present = "TRUE"\nide0:0.fileName = "Home.vmdk"\nide1:0.present = "TRUE"\nide1:0.deviceType = "cdrom-image"\nide1:0.fileName = "{path.name}"\nbios.bootOrder = "cdrom,hdd"\nusb.present = "FALSE"\nethernet0.present = "FALSE"\nserial0.present = "TRUE"\nserial0.fileType = "file"\nserial0.fileName = "stratus.log"\n'
+        )
+        bios = (d / "FreshOS.vmx").read_text()
+        (d / "FreshOS-x64.vmx").write_text(
+            bios.replace('firmware = "bios"', 'firmware = "efi"')
+            .replace('guestOS = "other"', 'guestOS = "other-64"')
+            .replace('memsize = "32"', 'memsize = "96"')
+            .replace(f"FreshOS 2 - {e}", f"FreshOS 2 - {e} (native x64)")
         )
     package(e)
 
@@ -378,8 +412,23 @@ def package(e):
             d / "Home.img",
             ROOT / "README.md",
             ROOT / "docs/licenses/DejaVu.txt",
-        ] + ([d / "Home.vmdk", d / "FreshOS.vmx"] if vm else []):
+        ] + ([d / "Home.vmdk", d / "FreshOS.vmx", d / "FreshOS-x64.vmx"] if vm else []):
             z.write(f, f.name)
+        for name in (
+            "docs/imp.md",
+            "forge/imp.py",
+            "forge/appdisk.py",
+            "native/vendor/fatfs/README.md",
+            "native/compat/imports.def",
+            "docs/native-processes.md",
+            "docs/chrome-acceptance.md",
+            "extras/cal/cal.exe",
+            "extras/cal/cal.c",
+            "extras/cal/build.sh",
+            "extras/cal/LICENSE",
+            "extras/cal/README.md",
+        ):
+            z.write(ROOT / name, name)
         z.writestr(
             "SHA256SUMS.txt",
             digest,

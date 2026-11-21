@@ -18,6 +18,7 @@ struct TextPoint {
 };
 int flow_map(Rect, const char *, int, u32, int, int, int *, struct TextPoint *);
 int flow(Rect, const char *, int, u32, int, int, int *);
+void shell_art(int, Rect);
 void glyph(int, int, int, int);
 void cursor(int, int);
 #define INK 0x183b50

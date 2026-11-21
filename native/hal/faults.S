@@ -17,7 +17,21 @@ stub %idx
 fault: cli
  cld
 #ifdef __x86_64__
- mov (%rsp),%rdi
+ cmpq $2,(%rsp)
+ je kernel_fault
+ cmpq $8,(%rsp)
+ je kernel_fault
+ cmpq $18,(%rsp)
+ je kernel_fault
+ testb $3,24(%rsp)
+ jnz user_trap
+kernel_fault:
+ mov %cr3,%rax
+ cmp user_root(%rip),%rax
+ jne 1f
+ mov host_root(%rip),%rax
+ mov %rax,%cr3
+1: mov (%rsp),%rdi
  mov 8(%rsp),%rsi
  mov 16(%rsp),%rdx
  and $-16,%rsp
@@ -37,7 +51,12 @@ timer_irq:
  mov $32,%al
  out %al,$32
  pop %rax
- iretq
+ testb $3,8(%rsp)
+ jz 1f
+ pushq $0
+ pushq $32
+ jmp user_trap
+1: iretq
 #else
  push %eax
  incl ticks

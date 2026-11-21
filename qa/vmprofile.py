@@ -43,8 +43,7 @@ def check():
                             return result["return"]
 
                 call("qmp_capabilities")
-                x = max(34, min(w // 12, 122)) + 210
-                y = max(97, min(h // 4, 260)) + 150
+                scale = min(w / 960, h / 540)
 
                 def click(x, y):
                     for events in [
@@ -64,7 +63,22 @@ def check():
                         call("input-send-event", {"events": events})
                         time.sleep(0.2)
 
-                click(x, y)
+                click(510 * w // 960, 455 * h // 540)  # Use OS
+                click(int(16 * scale), int(15 * scale))
+                g.wait("open: imp")
+                # Windowed library, third row: inbox -> installed -> interactive Win32 dialog.
+                frame_x = (w - min(980, w * 72 // 100)) // 2
+                frame_y = (h - min(690, h * 78 // 100)) // 2
+                row = (frame_x + 90, frame_y + 57 + 64 + 2 * 30 + 13)
+                click(*row)
+                g.wait("Package installed")
+                click(*row)
+                g.wait("Win32 dialog: windll")
+                click(w // 2 + 198, h // 2 + 77)
+                g.wait("IMP: windll exit 0")
+                g.key("esc")
+                click(int(16 * scale), int(277 * scale))
+                click(int(115 * scale), int(216 * scale))
                 g.wait("open: files")
                 g.key("f3")
                 g.type("settings\n")
@@ -97,6 +111,26 @@ def check():
         with Guest(d, None, disk, False) as g:
             g.wait("workspace ready")
             g.wait("Home disk / writable")
+        profile = (d / "FreshOS-x64.vmx").read_text()
+        assert all(
+            s in profile
+            for s in (
+                'firmware = "efi"',
+                'guestOS = "other-64"',
+                'memsize = "96"',
+                'ide0:0.fileName = "Home.vmdk"',
+            )
+        )
+        with Guest(
+            d, None, disk, True, ["-machine", "pc,vmport=on", "-vga", "vmware"]
+        ) as g:
+            g.wait("workspace ready")
+            g.key("f3")
+            g.type("install cal64\n")
+            g.wait("Package installed")
+            g.type("run cal64 2 2024\n")
+            g.wait("process: PE64 user mode")
+            g.wait("25 26 27 28 29")
     print(
         "PASS VM archive, VMDK descriptor + extent, absolute click, verified install and VMDK-only boot"
     )

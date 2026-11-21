@@ -4,7 +4,8 @@
 #include "math.h"
 #include "pci.h"
 #include "calendar.h"
-enum { FILES, WRITER, CALC, TERM, SETTINGS, DEVICE, SKETCH, CLOCK, APPS };
+#include "package.h"
+enum { FILES, WRITER, CALC, TERM, SETTINGS, DEVICE, SKETCH, CLOCK, PACKAGES, APPS };
 struct App {
     const char *name, *hint, *cmd;
     u32 tint;
@@ -17,10 +18,12 @@ static const struct App app[APPS] = {
     {"Settings", "Tune your workspace", "settings", 0x93cbb8},
     {"System", "Inspect the running kernel", "system", 0xc3a3d9},
     {"Sketch", "Draw on a scalable canvas", "sketch", 0xeaa096},
-    {"Clock", "Local time and countdown", "clock", 0x9dbbe4}};
+    {"Clock", "Local time and countdown", "clock", 0x9dbbe4},
+    {"IMP", "Installed packages", "imp", 0x11cdff}};
 static const u32 accents[] = {0x117b78, 0x3866a0, 0x895b95};
 static const char *const inks[] = {"Ocean", "Coral", "Leaf", "Erase"};
 static const u32 colors[] = {0x246298, 0xce746b, 0x398468, WHITE};
+static int choice, pop;
 static int settings_tab, clock_h, clock_m;
 static int confirm_install, year, month, today, month_shift;
 static const char *months[] = {"January",   "February", "March",    "April",
@@ -35,7 +38,7 @@ static struct TextPoint positions[NOTE_CAP];
 static int active = -1, opened[APPS], mode[APPS], start = 0, dirty = 1, mx, my, button, shift,
            ctrl, caps, railshow;
 static Rect frame, area, paint_area, thumb_light, thumb_sound;
-static int adjusting;
+static int adjusting, welcome = 1;
 static char message[120];
 static u32 expiry;
 static int sel, editing = -1, caret, scroll, changed;
@@ -78,6 +81,10 @@ enum {
     MINUTES,
     MONTH,
     INSTALL,
+    POP,
+    RUNPKG,
+    WELCOME,
+    USE_OS,
     DISMISS
 };
 struct Target {
@@ -115,6 +122,7 @@ static void launch(int id) {
     confirm_install = 0;
     if (id < 0 || id >= APPS)
         return;
+    pop = 0;
     active = id;
     if (!opened[id] && home.wide_apps)
         mode[id] = 1;
@@ -192,6 +200,94 @@ static void compute(void) {
     } else
         strset(answer, sizeof answer, err);
 }
+static PeResult result;
+/* A plain MessageBox is synchronous in Win32. Keep the interpreter suspended
+ * until acknowledgment; never dispatch other programs on its call stack. */
+static int modal_slot;
+static void message_box(const char *text) {
+    clear_clip();
+    int w = low(520, sw - 64);
+    Rect p = rect((sw - w) / 2, (sh - 218) / 2, w, 218);
+    glass(rect(0, 0, sw, sh), 0, 0x123746, 80);
+    rounded(p, 16, WHITE);
+    rounded(rect(p.x + 3, p.y + 3, p.w - 6, 36), 12, 0xa6f4ee);
+    const char *caption = modal_slot < 0 ? "Windows application" : package_name(modal_slot);
+    label(p.x + 16, p.y + 10, caption, 1, INK);
+    flow(rect(p.x + 20, p.y + 56, p.w - 40, p.h - 115), text, 1, INK, 0, -1, 0);
+    Rect ok = rect(p.x + p.w - 102, p.y + p.h - 48, 80, 32);
+    rounded(ok, 9, 0x177e78);
+    label(ok.x + 30, ok.y + 6, "OK", 1, WHITE);
+    present(home.light);
+    cursor(mx, my);
+    uart("Win32 dialog: ");
+    logline(caption);
+    for (;;) {
+        input_poll();
+        int k;
+        while ((k = key_event()) >= 0) {
+            if (k == 28 || k == 1 || k == 57)
+                goto done;
+        }
+        int x, y, b;
+        int moved = pointer_event(&x, &y, &b) && !vm_absolute();
+        if (moved) {
+            mx = bound(mx + x, 0, sw - 1);
+            my = bound(my + y, 0, sh - 1);
+        }
+        if (vm_pointer(&x, &y, &b)) {
+            mx = x * (sw - 1) / 65535;
+            my = y * (sh - 1) / 65535;
+            moved = 1;
+        }
+        if (moved) {
+            int pressed = (b & 1) && !(button & 1);
+            button = b;
+            cursor(mx, my);
+            if (pressed && hit(ok, mx, my))
+                break;
+        }
+        idle();
+    }
+done:
+    dirty = 1;
+    shift = ctrl = 0;
+}
+static void report_process(const char *name, int ok) {
+    char n[16];
+    decimal(n, result.exit_code);
+    uart("IMP: ");
+    uart(name);
+    uart(ok ? " exit " : " failed ");
+    logline(ok ? n : result.detail);
+    logline(result.output);
+    print(result.detail);
+    char line[160];
+    int nchar = 0;
+    for (const char *p = result.output; *p; p++) {
+        if (*p == '\n' || nchar == 159) {
+            line[nchar] = 0;
+            print(line);
+            nchar = 0;
+        }
+        if (*p != '\n')
+            line[nchar++] = *p;
+    }
+    if (nchar) {
+        line[nchar] = 0;
+        print(line);
+    }
+}
+static void runpkg(int slot, const char *args) {
+    compat_args(package_name(slot), args);
+    modal_slot = slot;
+    int ok = package_run(slot, &result, message_box);
+    report_process(package_name(slot), ok);
+}
+static void installpkg(int s) {
+    package_install(s, &result);
+    print(result.detail);
+    status(result.detail);
+}
 static void execute(void) {
     char buf[160];
     strset(buf, sizeof buf, command);
@@ -205,11 +301,47 @@ static void execute(void) {
         *args++ = 0;
     while (*args == ' ')
         args++;
-    if (equal(buf, "install")) {
+    if (equal(buf, "packages")) {
+        for (int i = 0; i < PKG_SLOTS; i++)
+            if (*package_name(i))
+                print(package_name(i));
+    } else if (equal(buf, "runfile") && *args) {
+        char path[128] = "/";
+        char *tail = args;
+        while (*tail && *tail != ' ')
+            tail++;
+        if (*tail)
+            *tail++ = 0;
+        if (length(args) > 125) {
+            print("App disk path too long");
+            return;
+        }
+        strset(path + 1, sizeof path - 1, args);
+        compat_args(args, tail);
+        modal_slot = -1;
+        report_process(args, raw_run(path, &result, message_box));
+    } else if (equal(buf, "run") || (equal(buf, "install") && *args)) {
+        char *tail = args;
+        while (*tail && *tail != ' ')
+            tail++;
+        if (*tail)
+            *tail++ = 0;
+        int i = 0;
+        while (i < PKG_SLOTS && (!*args || !equal(package_name(i), args)))
+            i++;
+        if (i < PKG_SLOTS) {
+            if (equal(buf, "install"))
+                installpkg(i);
+            else
+                runpkg(i, tail);
+        } else
+            print("No installed IMP by that name");
+    } else if (equal(buf, "install")) {
         launch(DEVICE);
         confirm_install = 1;
         status("Confirm Install on the System page to continue");
     } else if (equal(buf, "help")) {
+        print("packages | install NAME | run NAME | runfile PATH | open imp");
         print("apps | open NAME | ls | cat FILE | edit FILE | new FILE | save");
         print("calc EXPR | echo TEXT | uptime | disks | install | ver | clear | exit");
     } else if (equal(buf, "apps"))
@@ -295,12 +427,12 @@ static int docked(void) {
     return !(active >= 0 && mode[active] == 2) &&
            (!home.autohide || railshow || start || active < 0);
 }
-static int dockh(void) { return docked() ? 64 : 0; }
 static void geometry(void) {
-    int h = sh - dockh();
-    if (active >= 0 && mode[active])
-        frame = rect(0, 0, sw, h);
-    else {
+    int h = sh;
+    if (active >= 0 && mode[active]) {
+        int left = docked() ? sw / 26 : 0;
+        frame = rect(left, 0, sw - left, h);
+    } else {
         int w = bound(sw * 72 / 100, 580, 980), fh = bound(h * 78 / 100, 360, 690);
         if (!placed[active]) {
             wx[active] = (sw - w) / 2;
@@ -703,76 +835,117 @@ static void clock_view(Rect a) {
     button_at(rect(x + 61, y, 54, 32), "+", MINUTES, 1, 0);
     button_at(rect(x + 124, y, 120, 32), alarm ? "Cancel timer" : "Start timer", ALARM, 0, 1);
 }
-static void desktop_home(void) {
-    glass(rect(22, 22, sw - 44, 44), 18, 0xe6f7f9, 201);
-    label(43, 34, "FreshOS   /   Stratus", 1, INK);
-    label(sw - 114, 35, timetext, 0, DIM);
-    int x = bound(sw / 12, 34, 122), y = bound(sh / 4, 97, 260), w = low(sw - x * 2, 690);
-    glass(rect(x, y, w, 190), 22, 0xe6f6f7, 209);
-    label(x + 28, y + 23, "WORKSPACE   /   " EDITION, 0, 0x17766e);
-    label(x + 28, y + 54, "Welcome to FreshOS", 2, INK);
-    shorten(x + 28, y + 97, "A native desktop. Your documents, tools and settings live here.",
-            1, DIM, w - 56);
-    button_at(rect(x + 28, y + 137, 120, 34), "All apps", START, 0, 1);
-    button_at(rect(x + 158, y + 137, 126, 34), "Open Files", OPEN, FILES, 0);
-    if (y + 315 < sh - 75) {
-        int cardw = (w - 12) / 2;
-        for (int j = 0; j < 2; j++) {
-            int id = j ? SKETCH : WRITER;
-            Rect r = rect(x + j * (cardw + 12), y + 203, cardw, 93);
-            glass(r, 16, 0xf4fbf8, 219);
-            glyph(id, r.x + 15, r.y + 23, 42);
-            label(r.x + 70, r.y + 18, j ? "QUICK TOOL" : "YOUR DOCUMENT", 0, DIM);
-            shorten(r.x + 70, r.y + 44, j ? "Open sketchbook" : home.notes[sel].name, 1, INK,
-                    r.w - 83);
-            target(r, j ? OPEN : READ, j ? id : 0);
-        }
-    }
+/* Reference artwork uses 960 x 540 design coordinates; maintain square controls
+ * even on 4:3 framebuffers. Anchor the assistant at the lower middle. */
+static int scale(int v) { return v * low(sw * 1000 / 960, sh * 1000 / 540) / 1000; }
+static Rect tile(int x, int y, int w, int h) {
+    return rect(scale(x), scale(y), scale(w), scale(h));
+}
+static void center(Rect r, int y, const char *s, int f, u32 c) {
+    label(r.x + (r.w - width(s, f)) / 2, y, s, f, c);
+}
+static void desk_date(char b[16]) {
+    decimal(b, month);
+    add(b, 16, '/');
+    decimal(b + length(b), today);
 }
 static void dock(void) {
-    int w = low(sw - 20, 530), x = (sw - w) / 2, y = sh - 59;
-    glass(rect(x + 2, y + 3, w, 51), 17, 0x466e7c, 130);
-    glass(rect(x, y, w, 51), 17, 0xe4f8f7, 227);
-    button_at(rect(x + 9, y + 8, 62, 34), "Start", START, 0, start);
-    int cell = (w - 85) / APPS;
+    Rect rail = tile(0, 0, 34, 334);
+    shell_art(start ? 1 : 0, rail);
+    Rect head = tile(0, 0, 31, 39);
+    glyph(8, scale(5), scale(3), scale(21));
+    center(head, scale(24), "IMP", 0, INK);
+    target(head, OPEN, PACKAGES);
+    Rect clk = tile(0, 143, 31, 32);
+    char date[16];
+    desk_date(date);
+    if (!start && pop != 1) {
+        clip(clk);
+        center(clk, clk.y, timetext[0] == '0' ? timetext + 1 : timetext, 0, DIM);
+        center(clk, clk.y + 14, date, 0, DIM);
+        clear_clip();
+    }
+    target(clk, OPEN, CLOCK);
+    target(tile(0, 175, 30, 21), POP, 1);
+    target(tile(0, 197, 30, 20), POP, 2);
+    target(tile(0, 218, 30, 21), POP, 3);
+    target(tile(0, 242, 34, 88), START, 0);
+}
+static void launcher(void) {
+    Rect disc = tile(54, 157, 238, 238), clock = tile(239, 54, 184, 184);
+    shell_art(2, clock);
+    center(clock, clock.y + clock.h / 2 - scale(30),
+           timetext[0] == '0' ? timetext + 1 : timetext, sw >= 1280 ? 3 : 2, DIM);
+    char date[16];
+    desk_date(date);
+    center(clock, clock.y + clock.h / 2 + scale(17), date, sw >= 1280 ? 2 : 1, DIM);
+    target(clock, OPEN, CLOCK);
+    shell_art(2, disc);
+    center(disc, disc.y + scale(18), "All Apps", 1, DIM);
     for (int i = 0; i < APPS; i++) {
-        Rect r = rect(x + 78 + i * cell, y + 4, cell - 3, 42);
-        if (active == i)
-            rounded(r, 9, 0xaddbd6);
-        glyph(i, r.x + (r.w - 27) / 2, y + 9, 27);
-        if (opened[i])
-            rounded(rect(r.x + r.w / 2 - 5, y + 40, 10, 3), 2, accents[home.accent]);
+        Rect r = tile(87 + i % 3 * 57, 201 + i / 3 * 47, 56, 45);
+        int size = scale(22);
+        if (i == choice)
+            glass(rect(r.x + 1, r.y, r.w - 2, r.h), 8, WHITE, 110);
+        glyph(i, r.x + (r.w - size) / 2, r.y, size);
+        center(r, r.y + size, app[i].name, 0, INK);
         target(r, OPEN, i);
     }
+    Rect intro = tile(158, 354, 30, 27);
+    glyph(8, intro.x, intro.y, scale(19));
+    target(intro, WELCOME, 0);
 }
-static int choice;
-static void launcher(void) {
-    int w = low(720, sw - 40), h = low(sh - 92, 370);
-    Rect r = rect((sw - w) / 2, sh - h - 69, w, h);
-    glass(r, 20, 0xe8f4f7, 246);
-    label(r.x + 23, r.y + 15, "START  /  APPLICATIONS", 0, accents[home.accent]);
-    label(r.x + 23, r.y + 38, "Your workspace", 2, INK);
-    int cols = w >= 650 ? 4 : 2, rows = (APPS + cols - 1) / cols, cw = (w - 32) / cols,
-        ch = (h - 88) / rows;
-    for (int i = 0; i < APPS; i++) {
-        Rect p = rect(r.x + 16 + i % cols * cw, r.y + 77 + i / cols * ch, cw - 6, ch - 6);
-        rounded(p, 10, i == choice ? 0xafded4 : WHITE);
-        if (ch > 75) {
-            glyph(i, p.x + 14, p.y + 12, 34);
-            label(p.x + 14, p.y + 56, app[i].name, 1, INK);
-        } else {
-            glyph(i, p.x + 9, p.y + (p.h - 24) / 2, 24);
-            label(p.x + 43, p.y + (p.h - 20) / 2, app[i].name, 1, INK);
-        }
-        target(p, OPEN, i);
+static void bubbles(void) {
+    if (start || pop == 1) {
+        Rect r = tile(0, 99, 96, 85);
+        shell_art(3, r);
+        int last = -1, n = 0;
+        for (int i = 0; i < APPS; i++)
+            if (opened[i]) {
+                last = i;
+                n++;
+            }
+        center(r, r.y + scale(13), n ? app[last].name : "No apps", 0, DIM);
+        center(r, r.y + scale(32), "in Tray", 0, DIM);
+        if (n)
+            target(r, OPEN, last);
     }
+    if (pop < 2)
+        return;
+    int x = sw / 2, y = sh - scale(54);
+    glyph(8, x, y, scale(54));
+    target(rect(x, y, scale(54), scale(54)), POP, 0);
+    Rect r = rect(x + scale(27), sh - scale(124), scale(132), scale(102));
+    shell_art(pop == 3 ? 4 : 5, r);
+    if (pop == 2) {
+        center(r, r.y + scale(16), "Network", 1, INK);
+        center(r, r.y + scale(38), "Offline", 0, DIM);
+        return;
+    }
+    int light = pop == 4;
+    center(r, r.y + scale(8), light ? "Brightness" : "Volume", 1, INK);
+    Rect t = rect(r.x + scale(14), r.y + scale(37), r.w - scale(28), scale(23));
+    rounded(t, 7, 0x09cbff);
+    int pct = light ? (int)(home.light - 35) * 100 / 65 : (int)home.sound;
+    rounded(rect(t.x, t.y, t.w * pct / 100, t.h), 7, 0x60f628);
+    if (light)
+        thumb_light = t;
+    else
+        thumb_sound = t;
+    target(t, light ? LIGHT : SOUND, 0);
+    target(rect(r.x, r.y, r.w, scale(32)), POP, light ? 3 : 4);
 }
 static int autoroll;
 static void paint_window(void) {
     geometry();
     if (mode[active] == 0)
         glass(rect(frame.x + 3, frame.y + 6, frame.w, frame.h), 16, 0x204f63, 135);
-    rounded(frame, mode[active] ? 0 : 15, PAPER);
+    rounded(frame, mode[active] ? 0 : 15, WHITE);
+    for (int y = 3; y < 43; y++) {
+        int a = y <= 24 ? y * 10 : (42 - y) * 13;
+        fill(rect(frame.x + 4, frame.y + y, frame.w - 8, 1),
+             ((255 - a) << 16) | (255 << 8) | (255 - a / 3));
+    }
     glyph(active, frame.x + 15, frame.y + 9, 29);
     label(frame.x + 56, frame.y + 13, app[active].name, 1, INK);
     int x = frame.x + frame.w;
@@ -784,6 +957,30 @@ static void paint_window(void) {
     fill(rect(frame.x + 10, frame.y + 46, frame.w - 20, 1), 0xd4e4e9);
     clip(area);
     switch (active) {
+    case PACKAGES: {
+        heading(area, "HOME DISK  /  EXECUTABLES", "IMP Library");
+        int y = area.y + 64;
+        for (int i = 0; i < PKG_SLOTS; i++)
+            if (*package_name(i)) {
+                char caption[44];
+                strset(caption, sizeof caption, package_pending(i) ? "Install: " : "Run: ");
+                strset(caption + length(caption), sizeof caption - length(caption),
+                       package_name(i));
+                button_at(rect(area.x + 8, y, 160, 26), caption, RUNPKG, i,
+                          package_pending(i));
+                y += 30;
+            }
+        if (y == area.y + 64)
+            label(area.x + 8, y, "No packages on Home", 0, DIM);
+        Rect report = rect(area.x + 188, area.y + 68, area.w - 208, area.h - 88);
+        label(report.x, report.y,
+              result.detail[0] ? result.detail : "Choose an installed package to run.", 1,
+              INK);
+        report.y += 36;
+        report.h -= 36;
+        flow(report, result.output, 1, DIM, 0, -1, 0);
+        break;
+    }
     case FILES:
         files_view(area);
         break;
@@ -827,21 +1024,36 @@ static void paint_window(void) {
 static void repaint(void) {
     clear_clip();
     count = 0;
+    if (welcome) {
+        wallpaper(rect(0, 0, sw, sh), 3);
+        Rect use = rect(sw * 472 / 960, sh * 377 / 540, sw * 78 / 960, sh * 163 / 540);
+        center(use, sh * 398 / 540, "Use OS", sw >= 1280 ? 2 : 1, 0xfaff79);
+        int x = use.x + use.w / 2, y = sh * 455 / 540;
+        rounded(rect(x - scale(15), y - scale(4), scale(30), scale(8)), 1, 0x06ff96);
+        stroke(x + scale(14), y, x + scale(4), y - scale(9), scale(4), 0x06ff96);
+        stroke(x + scale(14), y, x + scale(4), y + scale(9), scale(4), 0x06ff96);
+        target(use, USE_OS, 0);
+        present(home.light);
+        cursor(mx, my);
+        dirty = 0;
+        return;
+    }
     if (active < 0 || mode[active] != 2 || start)
         wallpaper(rect(0, 0, sw, sh), home.wallpaper);
-    if (active < 0)
-        desktop_home();
-    else
+    if (active >= 0)
         paint_window();
-    if (docked())
+    if (docked() && !start)
         dock();
     if (start) {
         count = 0;
+        dock();
         launcher();
     }
+    if (docked() || start)
+        bubbles();
     if (message[0]) {
         int w = low(sw - 20, width(message, 0) + 36);
-        Rect p = rect((sw - w) / 2, sh - dockh() - 38, w, 32);
+        Rect p = rect((sw - w) / 2, sh - 38, w, 32);
         rounded(p, 13, 0x20495c);
         shorten(p.x + 16, p.y + 7, message, 0, WHITE, w - 32);
     }
@@ -861,6 +1073,22 @@ static void slider_set(int a, int x) {
 }
 static void action(int a, int arg) {
     switch (a) {
+    case WELCOME:
+        welcome = 1;
+        start = 0;
+        break;
+    case USE_OS:
+        welcome = 0;
+        break;
+    case RUNPKG:
+        if (package_pending(arg))
+            installpkg(arg);
+        else
+            runpkg(arg, "");
+        break;
+    case POP:
+        pop = pop == arg ? 0 : arg;
+        break;
     case MONTH:
         month_shift = bound(month_shift + arg, -120, 120);
         break;
@@ -878,10 +1106,12 @@ static void action(int a, int arg) {
         }
         break;
     case OPEN:
+        pop = 0;
         confirm_install = 0;
         launch(arg);
         break;
     case START:
+        pop = 0;
         start = !start;
         choice = 0;
         break;
@@ -978,7 +1208,7 @@ static void pointer(int dx, int dy, int b) {
     my = bound(my + dy, 0, sh - 1);
     int old = button;
     button = b;
-    int reveal = my > sh - 8 || (railshow && my >= sh - 64);
+    int reveal = mx < 8 || (railshow && mx <= scale(34));
     if (reveal != railshow) {
         railshow = reveal;
         if (home.autohide)
@@ -1000,6 +1230,8 @@ static void pointer(int dx, int dy, int b) {
     if ((b & 1) && adjusting)
         slider_set(adjusting, mx);
     if ((b & 1) && !(old & 1)) {
+        if (welcome && !count)
+            return;
         for (int i = count - 1; i >= 0; i--)
             if (hit(targets[i].r, mx, my)) {
                 int a = targets[i].action, id = targets[i].arg;
@@ -1010,6 +1242,8 @@ static void pointer(int dx, int dy, int b) {
                 last_click = ticks;
                 return;
             }
+        if (welcome)
+            return;
         if (!start && active >= 0 && !mode[active] &&
             hit(rect(frame.x, frame.y, frame.w - 215, 45), mx, my)) {
             dragging = 1;
@@ -1092,6 +1326,11 @@ static void keyboard(int raw) {
     if (!down)
         return;
     dirty = 1;
+    if (welcome) {
+        welcome = 0;
+        if (k == 28 || k == 1)
+            return;
+    }
     if (k == 58) {
         caps = !caps;
         return;
@@ -1110,6 +1349,10 @@ static void keyboard(int raw) {
         return;
     }
     if (k == 1) {
+        if (pop) {
+            pop = 0;
+            return;
+        }
         confirm_install = 0;
         if (start)
             start = 0;
@@ -1225,10 +1468,15 @@ static void update_clock(void) {
         hh = hh % 12 + (pm ? 12 : 0);
     clock_h = hh;
     clock_m = mm;
+    int ss = rtc(0);
+    if (!(b & 4))
+        ss = bcd(ss);
+    compat_clock(year, month, (first_weekday(year, month) + today - 1) % 7, today, hh, mm,
+                 bound(ss, 0, 59));
     char t[] = {'0' + hh / 10, '0' + hh % 10, ':', '0' + mm / 10, '0' + mm % 10, 0};
     if (!equal(t, timetext)) {
         strset(timetext, sizeof timetext, t);
-        if (active < 0 || active == CLOCK)
+        if (active < 0 || active == CLOCK || docked() || start)
             dirty = 1;
     }
     if (active == CLOCK && alarm)
@@ -1246,6 +1494,8 @@ void desktop(struct Display *d) {
     ps2_init();
     pci_init();
     home_init();
+    packages_init();
+    compat_display(sw, sh);
     mx = sw / 2;
     my = sh / 2;
     print("FreshOS native console. Type help to see commands.");

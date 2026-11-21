@@ -1,4 +1,21 @@
-# Stratus preview 1: what was tested
+# Stratus verification
+
+## Native x64 development build
+
+See [native processes: execution model and interoperability checks](native-processes.md). `qa/processes.py` boots OVMF, installs a third-party Windows EXE, exercises Windows and Linux memory lifecycles, verifies fault handling and watchdog expiry, and launches another package afterward. An optional BusyBox comparison uses the same static ELF on Linux and FreshOS. The browser live preview uses **BIOS**, not this CPU backend. Guest captures: [Windows calendar](screens/native/win64-cal.jpg) · [Linux BusyBox](screens/native/linux-busybox.jpg).
+
+## IMP2 desktop and package checks
+
+These are captures from the running native guest: [Welcome](screens/imp2/welcome.jpg) · [desktop](screens/imp2/desktop.jpg) · [All Apps](screens/imp2/all-apps.jpg) · [Win32 dialog from the packaged DLL example](screens/imp2/dll-message.jpg).
+
+* `qa/imp_tool.py` extracts the **shipped packer** and checks linking with/without the local DLL, rejection of a Linux interpreter dependency, and no changes to a foreign disk or a duplicate install.
+* `qa/packages.py` uses two guest boots per firmware. It refuses to launch an inbox package, installs it, executes real x86/x64 PE and static ELF programs, acknowledges the Windows dialogs, reads a newly supplied resource not on the ISO, rejects a corrupted package and reruns the installed DLL example after reboot.
+* `qa/vmprofile.py` clicks Use OS, opens the library via the rail, installs and runs the DLL example, dismisses its dialog with the mouse and opens Files from the radial menu. It also checks settings persistence and installation of the OS.
+* `qa/layout.py` now exercises nine native sessions including IMP Library. The v86 preview mounts a temporary Home image; the installed DLL sample was also installed, opened and acknowledged in the browser-hosted VM. Reloading that page starts a new session. The browser hosting v86 is **not** Chrome running inside Stratus.
+
+See [IMP2](imp.md) for exact limits.
+
+## Archived: Stratus preview 1
 
 The checks below used the compiled kernels, not the old desktop or a host-side recreation of the UI. No installed operating system, public website or Google account was required. Disposable VM disks only.
 

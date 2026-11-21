@@ -17,5 +17,6 @@ for name in ("seabios.bin", "vgabios.bin", "COPYING.LESSER"):
 shutil.copyfile(a.v86 / "LICENSE", out / "V86-LICENSE")
 shutil.copyfile(ROOT / "preview/index.html", out / "index.html")
 shutil.copyfile(ROOT / "build/Normal/FreshOS-Normal.iso", out / "live.iso")
+shutil.copyfile(ROOT / "build/Normal/Home.img", out / "Home.img")
 for name in (ROOT / "distros").glob("*.zip"):
     shutil.copyfile(name, out / name.name)

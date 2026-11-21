@@ -14,6 +14,7 @@ def verify(e, shots=None):
         shutil.copyfile(src / "Home.img", h)
         with Guest(d, src / f"FreshOS-{e}.iso", h, False) as g:
             g.wait("workspace ready")
+            g.key("ret")
             w, height = g.shot(d / "start.jpg")
             if shots:
                 shots.mkdir(exist_ok=True, parents=True)
@@ -27,6 +28,7 @@ def verify(e, shots=None):
                 "system",
                 "sketch",
                 "clock",
+                "imp",
             ]:
                 g.key("f3")
                 g.type("open " + app + "\n")
@@ -70,8 +72,8 @@ def verify(e, shots=None):
             g.type("open files\n")
             move(-w, -height)
             fw = min(980, max(580, w * 72 // 100))
-            fh = min(690, max(360, (height - 64) * 78 // 100))
-            move((w - fw) // 2 + fw - 98, (height - 64 - fh) // 2 + 21)
+            fh = min(690, max(360, height * 78 // 100))
+            move((w - fw) // 2 + fw - 98, (height - fh) // 2 + 21)
             click()
             g.wait("layout: files maximized")
             g.key("f11")
@@ -81,7 +83,7 @@ def verify(e, shots=None):
             g.monitor("nmi")
             g.wait("kernel stop: vector 2")
     print(
-        "PASS eight fullscreen layouts, restore, actual Max mouse target, previous mode restoration and CPU stop:",
+        "PASS nine fullscreen layouts, restore, actual Max mouse target, previous mode restoration and CPU stop:",
         e,
     )
 

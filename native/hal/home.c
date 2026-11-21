@@ -7,6 +7,12 @@ struct Home home;
 static struct Home staging;
 #define HOME_BASE 40960u
 static u16 port;
+/* Optional data disk: sector zero is a private marker, never a foreign MBR.
+ * Expose only the following fixed-size filesystem window. */
+#define DATA_START 2048u
+#define DATA_SECTORS 786432u
+static u16 app_port;
+static u8 app_unit;
 static int installed;
 static u8 unit;
 static int disks, slot = -1;
@@ -55,17 +61,17 @@ static int sector(unsigned lba, void *buf, int write) {
     out8(port + 7, write ? 0x30 : 0x20);
     if (!wait_disk(1))
         return 0;
-    for (int i = 0; i < 512; i += 2)
-        if (write)
-            out16(port, p[i] | (p[i + 1] << 8));
-        else {
-            u16 w = in16(port);
-            p[i] = w;
-            p[i + 1] = w >> 8;
-        }
+    unsigned words = 256;
+    if (write)
+        __asm__ volatile("cld; rep outsw" : "+S"(p), "+c"(words) : "d"(port) : "memory");
+    else
+        __asm__ volatile("cld; rep insw" : "+D"(p), "+c"(words) : "d"(port) : "memory");
     return wait_disk(0);
 }
 static int flush_disk(void) {
+    select_drive();
+    if (!wait_disk(0))
+        return 0;
     out8(port + 7, 0xe7);
     int ok = wait_disk(0);
     if (!ok)
@@ -104,11 +110,20 @@ static int mount_disk(void) {
             for (int i = 0; i < 256; i++)
                 words[i] = in16(port);
             disks++;
-            if (found || !(words[49] & 512) ||
-                ((u32)words[60] | (u32)words[61] << 16) < 65536)
+            if (!(words[49] & 512) || ((u32)words[60] | (u32)words[61] << 16) < 65536)
                 continue;
             u8 s[512];
             if (!sector(0, s, 0))
+                continue;
+            if (!app_port && same(s, "STRATUS/APPDATA1", 16) && get32(s + 16) == DATA_START &&
+                get32(s + 20) == DATA_SECTORS &&
+                ((u32)words[60] | (u32)words[61] << 16) >= DATA_START + DATA_SECTORS) {
+                app_port = port;
+                app_unit = unit;
+                logline("App data disk detected");
+                continue;
+            }
+            if (found)
                 continue;
             int boot = same(s + 400, "STRATUS/BOOT/002", 16) && s[510] == 85 && s[511] == 170;
             if (!boot && (!same(s, marker, 16) || get32(s + 16) != 257))
@@ -393,4 +408,46 @@ fail:
     install_message = "Install I/O error / check target before reboot";
     logline(install_message);
     return -1;
+}
+/* Read-only package library beyond both Home snapshot slots. */
+int home_package_sector(unsigned s, unsigned index, void *buf) {
+    return port && s < 8 && index <= 2048 && sector(41472 + s * 2049 + index, buf, 0);
+}
+
+int home_package_publish(unsigned s) {
+    u8 h[512];
+    if (!home_package_sector(s, 0, h) || !same(h, "F2INB001", 8))
+        return 0;
+    memcpy(h, "F2PKG001", 8);
+    return sector(41472 + s * 2049, h, 1) && flush_disk();
+}
+
+/* Runs on kernel CR3, never from IRQ code. Restore Home's selection even on failure. */
+int app_disk_present(void) { return app_port != 0; }
+int app_disk_io(u32 lba, u8 *p, unsigned count, int write) {
+    if (!app_port || !count || lba >= DATA_SECTORS || count > DATA_SECTORS - lba)
+        return 0;
+    u16 oldport = port;
+    u8 oldunit = unit;
+    port = app_port;
+    unit = app_unit;
+    int ok = 1;
+    for (unsigned i = 0; ok && i < count; i++)
+        ok = sector(DATA_START + lba + i, p + 512 * i, write);
+    port = oldport;
+    unit = oldunit;
+    return ok;
+}
+int app_disk_sync(void) {
+    if (!app_port)
+        return 0;
+    u16 oldport = port;
+    u8 oldunit = unit;
+    port = app_port;
+    unit = app_unit;
+    select_drive();
+    int ok = wait_disk(0) && flush_disk();
+    port = oldport;
+    unit = oldunit;
+    return ok;
 }

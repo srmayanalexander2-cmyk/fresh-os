@@ -69,17 +69,20 @@ void glass(Rect r, int z, u32 color, int opacity) {
 }
 extern const u8 art[] __attribute__((visibility("hidden")));
 void wallpaper(Rect r, int kind) {
-    const u16 *p = (const u16 *)art;
+    const u16 *p = (const u16 *)(kind == 3 ? art + WELCOME_OFF : art);
     Rect visible = intersect(r, limits);
     for (int y = visible.y; y < visible.y + visible.h; y++) {
-        if (kind) {
+        if (kind == 1 || kind == 2) {
             u32 a = kind == 1 ? 0x17646f : 0x3c456f, b = kind == 1 ? 0xa3e2cf : 0xf0c5bc;
             fill(rect(visible.x, y, visible.w, 1), blend(a, b, (y - r.y) * 255 / r.h));
             continue;
         }
-        int base = (y - r.y) * SKY_H / r.h * SKY_W;
+        int base = (y - r.y) * (kind == 3 ? WELCOME_H : SKY_H) / r.h *
+                   (kind == 3 ? WELCOME_W : SKY_W);
         for (int x = visible.x; x < visible.x + visible.w; x++) {
-            int sx = r.w == sw ? sky_column[x] : (x - r.x) * SKY_W / r.w;
+            int sx = kind == 3   ? (x - r.x) * WELCOME_W / r.w
+                     : r.w == sw ? sky_column[x]
+                                 : (x - r.x) * SKY_W / r.w;
             u32 c = p[base + sx];
             buffer[y * sw + x] = ((c & 0xf800) << 8) | ((c & 0x7e0) << 5) | ((c & 31) << 3);
         }
@@ -189,6 +192,17 @@ void glyph(int id, int x, int y, int size) {
             }
         }
 }
+void shell_art(int id, Rect r) {
+    const u8 *src = art + shell_off[id];
+    Rect b = intersect(r, limits);
+    for (int y = b.y; y < b.y + b.h; y++)
+        for (int x = b.x; x < b.x + b.w; x++) {
+            const u8 *p = src + 4 * ((y - r.y) * shell_h[id] / r.h * shell_w[id] +
+                                     (x - r.x) * shell_w[id] / r.w);
+            if (p[3])
+                buffer[y * sw + x] = (p[0] << 16) | (p[1] << 8) | p[2];
+        }
+}
 static int brightness = 100, cx = -20, cy = -20;
 static u32 native_color(u32 c) {
     if (brightness < 100)
@@ -203,10 +217,16 @@ void cursor(int x, int y) {
             fb[j * target.stride + i] = native_color(buffer[j * sw + i]);
     cx = x;
     cy = y;
-    for (int j = 0; j < 19 && y + j < sh; j++)
-        for (int i = 0; i <= j / 2 && x + i < sw; i++)
-            fb[(y + j) * target.stride + x + i] =
-                native_color(!i || i == j / 2 || j == 18 ? 0x193747 : WHITE);
+    for (int j = 0; j < 11 && y + j < sh; j++)
+        for (int i = 0; i < 11 && x + i < sw; i++) {
+            int dx = i - 5, dy = j - 5;
+            if (dx * dx + dy * dy <= 25)
+                fb[(y + j) * target.stride + x + i] =
+                    native_color(i == 0 || i == 10 ? 0x60e5ff
+                                 : i < 5           ? 0xb6f5ff
+                                 : i < 8           ? 0x13cfff
+                                                   : WHITE);
+        }
 }
 void present(int light) {
     brightness = light;

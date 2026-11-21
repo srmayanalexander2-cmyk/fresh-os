@@ -47,6 +47,22 @@ void irq_init(void) {
     for (int i = 0; i < 32; i++)
         gate(i, traplist[i]);
     gate(32, (ptr)timer_irq);
+#ifdef __x86_64__
+    extern void task64_boot(void);
+    task64_boot();
+    extern int task64_available(void);
+    if (task64_available()) {
+        idt[2].ist = 1;
+        idt[8].ist = 2;
+        idt[18].ist = 3;
+    }
+    extern void user_winapi(void) __attribute__((visibility("hidden")));
+    extern void user_int80(void) __attribute__((visibility("hidden")));
+    gate(0x80, (ptr)user_int80);
+    idt[0x80].flags = 0xee;
+    gate(0x81, (ptr)user_winapi);
+    idt[0x81].flags = 0xee;
+#endif
     struct {
         u16 size;
         ptr base;

@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   attach:
-    if: github.event.release.tag_name == 'v2.0.0-preview.1'
+    if: github.event.release.tag_name == 'v2.0.0-preview.2'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -21,10 +21,11 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/isos"
           for e in Normal Lite VMware VMware-Lite; do
-            p="distros/FreshOS-$e"; expected=$(cut -d' ' -f1 "$p.sha256")
-            actual=$(unzip -p "$p.zip" "FreshOS-$e.iso" | sha256sum | cut -d' ' -f1)
-            test "$actual" = "$expected"
+            p="distros/FreshOS-$e"
+            unzip -p "$p.zip" "FreshOS-$e.iso" > "$RUNNER_TEMP/isos/FreshOS-$e.iso"
+            (cd "$RUNNER_TEMP/isos" && sha256sum -c "$GITHUB_WORKSPACE/$p.sha256")
             unzip -tq "$p.zip"
           done
-          gh release upload "$TAG" distros/*.{zip,sha256} --clobber
+          gh release upload "$TAG" distros/*.{zip,sha256} "$RUNNER_TEMP"/isos/*.iso --clobber

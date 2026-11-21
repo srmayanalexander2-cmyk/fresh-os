@@ -27,6 +27,12 @@ def check(edition, efi):
         with Guest(d, None, disk, efi) as g:
             g.wait("workspace ready")
             g.key("f3")
+            if efi:
+                g.type("install cal64\n")
+                g.wait("Package installed")
+                g.type("run cal64 2 2024\n")
+                g.wait("process: PE64 user mode")
+                g.wait("25 26 27 28 29")
             g.type("new disk.txt\n")
             g.type("installed")
             g.key("ctrl-s")

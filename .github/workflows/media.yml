@@ -23,6 +23,10 @@ jobs:
       - run: python forge/media.py ${{ matrix.edition }}
       - run: python qa/boot.py ${{ matrix.edition }}
       - run: python qa/boot.py ${{ matrix.edition }} --efi
+      - run: python qa/imp_tool.py ${{ matrix.edition }}
+      - run: python qa/packages.py ${{ matrix.edition }}
+      - run: python qa/packages.py ${{ matrix.edition }} --efi
+      - run: python qa/processes.py ${{ matrix.edition }}
       - run: python qa/layout.py ${{ matrix.edition }}
       - if: matrix.edition == 'VMware-Lite'
         run: |
@@ -30,4 +34,15 @@ jobs:
           python qa/install.py VMware-Lite --efi
           python qa/vmprofile.py
       - if: matrix.edition == 'Lite'
-        run: python qa/recovery.py
+        run: |
+          python qa/recovery.py
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64-posix gcc-mingw-w64-i686-posix
+          extras/win-tools/build.sh /tmp/win-tools
+          python qa/win_tools.py Lite /tmp/win-tools
+          python qa/securitybuf.py Lite
+          python qa/guard32.py Lite
+          python qa/regpersist.py Lite
+          python qa/children.py Lite
+          curl -fsSL https://codeload.github.com/kyz/libmspack/tar.gz/8f2a2a91ae2d12f985a196d481962ca4731f0f4d | tar xz -C /tmp
+          extras/cabstage/build.sh /tmp/libmspack-8f2a2a91ae2d12f985a196d481962ca4731f0f4d /tmp/stage.exe build/Lite/pe64/KERNEL32.a
+          python qa/cabstage.py Lite /tmp/stage.exe
