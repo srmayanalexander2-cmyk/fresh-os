@@ -4,6 +4,7 @@
 import argparse, io, os, struct, subprocess, time
 from unittest.mock import patch
 from pathlib import Path
+from netbuild import NET_SOURCES, NET_FLAGS
 import pycdlib
 from art import bake, ROOT
 from efi import efi
@@ -122,6 +123,7 @@ def build(edition, wallpaper=None, compact=False):
         )
     objects = []
     for source in [
+        *NET_SOURCES,
         ROOT / "kernel/entry.S",
         ROOT / "kernel/platform.c",
         ROOT / "kernel/shell.c",
@@ -141,6 +143,7 @@ def build(edition, wallpaper=None, compact=False):
                 "-Wextra",
                 "-Werror",
                 "-m32",
+                *NET_FLAGS,
                 "-march=i386",
                 "-msoft-float",
                 "-mno-sse",

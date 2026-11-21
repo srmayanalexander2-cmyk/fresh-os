@@ -138,7 +138,7 @@ static void drive_line(const char *s) {
         text(drivex, drivey + driverow++ * 20, s, 0, INK);
 }
 static void files_draw(int x, int y) {
-    text(x, y, "Workspace", 2, INK);
+    pill(x, y, 133, 28, "Home files", filetab == 3);
     pill(x + 143, y, 84, 28, "Drives", filetab == 2);
     pill(x + 235, y, 106, 28, "Library", !filetab);
     pill(x + 350, y, 115, 28, "Recent", filetab == 1);
@@ -151,7 +151,8 @@ static void files_draw(int x, int y) {
         return;
     }
     text(x, y + 34,
-         filetab
+         filetab == 3 ? "HOME DIRECTORY   /   SORTED BY NAME"
+         : filetab
              ? (home_ready() ? "FRESH HOME   /   RECENT FILES" : "SESSION   /   RECENT FILES")
              : "BUILT-IN DOCUMENTS & PROGRAMS",
          0, 0x3a737c);
@@ -160,7 +161,7 @@ static void files_draw(int x, int y) {
         int i = fileidx / 4 * 4 + j;
         if (i >= n)
             break;
-        const char *name = filetab ? recent[i] : library[i];
+        const char *name = filetab == 3 ? directory[i] : filetab ? recent[i] : library[i];
         int yy = y + 55 + j * 34;
         gel(x, yy, 466, 30, 8, WHITE, i == fileidx ? 0xaceede : 0xe1eff2,
             i == fileidx ? 0xd4fff1 : 0xf2f8f9);
@@ -168,6 +169,8 @@ static void files_draw(int x, int y) {
                       ? WINDOWS
                   : eq(name, "canvas") ? PAINT
                                        : WRITER;
+        if (suffix(name, ".html") || suffix(name, ".htm"))
+            app = BROWSER;
         if (suffix(name, ".wav")) {
             GLYPH(SOUND, x + 6, yy + 4, 27, 20);
         } else
@@ -178,7 +181,8 @@ static void files_draw(int x, int y) {
             b[len(b) - 1] = 0;
         text(x + 42, yy + 4, b, 1, INK);
         text(x + 345, yy + 7,
-             suffix(name, ".bmp")   ? "Photo / BMP"
+             app == BROWSER         ? "Web document"
+             : suffix(name, ".bmp") ? "Photo / BMP"
              : suffix(name, ".wav") ? "PCM sound"
              : suffix(name, ".elf") ? "Linux ELF"
              : suffix(name, ".exe") ? "Windows EXE"
@@ -188,7 +192,10 @@ static void files_draw(int x, int y) {
              0, INK);
     }
     if (!n)
-        text(x + 12, y + 84, "No recent files. Convert an EXE or save a document.", 1, INK);
+        text(x + 12, y + 84,
+             filetab == 3 ? "No files here. Mount a writable Fresh Home disk."
+                          : "No recent files. Convert an EXE or save a document.",
+             1, INK);
     if (n) {
         pill(x, y + 211, 85, 30, "Open", 1);
         if (suffix(selection(), ".imp"))
@@ -202,6 +209,12 @@ static void files_draw(int x, int y) {
     }
 }
 static void file_click(int x, int y) {
+    if (inside(x, y, 0, 0, 133, 29)) {
+        filetab = 3;
+        fileidx = 0;
+        file_refresh();
+        return;
+    }
     if (inside(x, y, 143, 0, 84, 29)) {
         filetab = 2;
         return;

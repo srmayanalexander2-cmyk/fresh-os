@@ -1,5 +1,8 @@
+#include "filecmd.inc"
 /* Aliases map only to implemented operations. Fresh Home is a flat record store. */
 static int shell_tools(char *s) {
+    if (data_commands(s))
+        return 1;
     if (eq(s, "disks") || eq(s, "lsblk") || eq(s, "disklist")) {
         storage_list(say);
         return 1;

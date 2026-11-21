@@ -3,7 +3,7 @@
 Status of this build, not the unavailable system described in `take.txt`. **Partial** means a specific FreshOS counterpart exists, not Windows API or binary compatibility. Unimplemented entries are not registered as fake apps.
 
 
-See [the 1.4 usability update and outstanding requests](usability.md) for the later, expanded list.
+See [the 1.4 usability update and outstanding requests](usability.md) for the later, expanded list and [1.5 implemented features](aero.md).
 
 ## Windows 10 (Version 1507) Features
 
@@ -193,5 +193,5 @@ See the [transcript audit](take-audit.md) for the original requests, line refere
 | Android apps | Removed by request. |
 | Privilege tiers, registry, antivirus, security guards | Not implemented. No claims of process isolation or malware protection. |
 | Universal drivers, VM guest additions and hardware masking | Partial: PCI inventory and in-box device bindings; native VMware guest pointer integration, not official VMware Tools. No hardware masking or universal drivers. |
-| Web, media, online drivers, store and network updates | Partial: PCnet DHCP/ARP, UART radio commands and short AC97 WAV playback. CD/installer offline; no browser, online driver store or updater. |
+| Web, media, online drivers, store and network updates | Partial: PCnet/82540EM IPv4, Aero HTTP/text/limited JavaScript, UART radio commands and short AC97 WAV playback. CD/installer offline; no TLS or modern web platform, online driver store or updater. |
 | Visual match | Supplied welcome artwork, sky, left rail, clock and launcher geometry. Interactive apps and text are original, not screenshot facsimiles of Chrome or Windows. |

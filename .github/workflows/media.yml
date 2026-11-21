@@ -2,7 +2,7 @@ name: Build FreshOS media
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['boot/**', 'kernel/**', 'tools/**', 'examples/**', 'tests/**', 'assets/**', 'requirements.txt', '.github/workflows/media.yml']
+    paths: ['boot/**', 'kernel/**', 'tools/**', 'examples/**', 'tests/**', 'third_party/**', 'assets/**', 'requirements.txt', '.github/workflows/media.yml']
 permissions:
   contents: read
 jobs:
@@ -23,16 +23,22 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends binutils build-essential fonts-dejavu-core qemu-system-x86 ovmf
           python -m pip install -r requirements.txt
+      - run: cc -O2 tests/filecmd.c -o /tmp/filecmd && /tmp/filecmd
+      - run: python tests/aerojs.py
       - run: python tests/filetools.py
       - run: python tests/test_compat.py -v
       - run: python tools/build.py ${{ matrix.edition }}
       - run: python tools/check.py out/FreshOS-${{ matrix.edition }}.iso
       - run: python tools/smoke.py out/FreshOS-${{ matrix.edition }}.iso
+      - run: python tests/browser.py out/FreshOS-${{ matrix.edition }}.iso
+      - run: python tests/browser.py out/FreshOS-${{ matrix.edition }}.iso --uefi --nic e1000 --errors
       - name: Exercise graphical file conversion and Writer with mouse input
         if: matrix.edition == 'VMware-Lite'
         run: |
           python tests/desktop.py out/FreshOS-VMware-Lite.iso
           python tests/utilities.py out/FreshOS-VMware-Lite.iso
+          python tests/browser_home.py out/FreshOS-VMware-Lite.iso
+          python tests/browser_dns.py out/FreshOS-VMware-Lite.iso
           python tests/usability.py out/FreshOS-VMware-Lite.iso
           python tests/vmstorage.py out/FreshOS-VMware-Lite.iso build/VMware-Lite/vm/FreshTarget.vmdk
       - name: Exercise PCI devices, guest file consent, ELF and UART protocols

@@ -1,9 +1,11 @@
+#include "webnet.h"
 /* AMD PCnet PCI, software style 2. Ethernet/IPv4 DHCP client and gateway
- * neighbour discovery. No sockets, no background traffic until `net dhcp`. */
+ * neighbour discovery shared with 82540EM. lwIP handles application traffic. */
 static u16 nic;
 static u8 mac[6];
 static u32 ip, gateway, offer, server, xid, deadline, lease_end;
 static int phase, neighbour;
+static u32 retry_at;
 static struct {
     u16 mode, rings;
     u8 mac[6], pad[2], filter[8];
@@ -16,9 +18,10 @@ struct ring {
     u32 msg, res;
 };
 static struct ring rx[4] __attribute__((aligned(16))), tx[2] __attribute__((aligned(16)));
-static u8 rxb[4][1536] __attribute__((aligned(16))),
+static u8 rxb[8][2048] __attribute__((aligned(16))),
     txb[2][1536] __attribute__((aligned(16)));
 static unsigned ri, ti;
+#include "e1000.inc"
 static void csr(u16 r, u16 v) {
     o16(nic + 18, r);
     o16(nic + 16, v);
@@ -88,9 +91,9 @@ static u16 checksum(const u8 *p, int n) {
     return ~v;
 }
 static u8 *frame(int type, const u8 *dest) {
-    if (tx[ti].status & 0x8000)
+    if (txbusy())
         return 0;
-    u8 *p = txb[ti];
+    u8 *p = txb[ti & 1];
     for (int i = 0; i < 600; i++)
         p[i] = 0;
     for (int i = 0; i < 6; i++) {
@@ -101,7 +104,18 @@ static u8 *frame(int type, const u8 *dest) {
     return p + 14;
 }
 static void transmit(int n) {
-    tx[ti].len = -(n < 60 ? 60 : n);
+    if (eport) {
+        et[ti].len = n;
+        et[ti].cmd = 0x0b;
+        et[ti].status = 0;
+        __sync_synchronize();
+        ti = (ti + 1) & 7;
+        ew(0x3818, ti);
+        return;
+    }
+    while (n < 60)
+        txb[ti][n++] = 0;
+    tx[ti].len = -n;
     tx[ti].msg = 0;
     __sync_synchronize();
     tx[ti].status = 0x8300;
@@ -143,9 +157,10 @@ static void dhcp(int request) {
         o += 4;
     }
     *o++ = 55;
-    *o++ = 3;
+    *o++ = 4;
     *o++ = 1;
     *o++ = 3;
+    *o++ = 6;
     *o++ = 51;
     *o = 255;
     be(u + 4, 2, 308);
@@ -174,15 +189,15 @@ static void received(const u8 *p, int n) {
     if (n < 42)
         return;
     unsigned type = netint(p + 12, 2);
+    if (phase == 3)
+        web_frame(p, n);
     if (type == 0x806) {
         const u8 *a = p + 14;
         if (!ip || netint(a, 4) != 0x00010800 || a[4] != 6 || a[5] != 4 ||
             netint(a + 24, 4) != ip)
             return;
         u32 from = netint(a + 14, 4);
-        if (netint(a + 6, 2) == 1)
-            arp(1, from, a + 8);
-        else if (netint(a + 6, 2) == 2 && from == gateway) {
+        if (netint(a + 6, 2) == 2 && from == gateway) {
             neighbour = 1;
             serial("Gateway ARP resolved\r\n");
         }
@@ -207,7 +222,7 @@ static void received(const u8 *p, int n) {
     for (int i = 0; i < 6; i++)
         if (b[28 + i] != mac[i])
             return;
-    u32 srv = 0, g = 0, lease = 300;
+    u32 srv = 0, g = 0, mask = 0, ns = 0, lease = 300;
     int kind = 0;
     for (int i = 240; i < udp - 8;) {
         int code = b[i++];
@@ -224,6 +239,10 @@ static void received(const u8 *p, int n) {
             kind = b[i];
         if (code == 54 && sz == 4)
             srv = netint(b + i, 4);
+        if (code == 1 && sz == 4)
+            mask = netint(b + i, 4);
+        if (code == 6 && sz >= 4)
+            ns = netint(b + i, 4);
         if (code == 3 && sz >= 4)
             g = netint(b + i, 4);
         if (code == 51 && sz == 4)
@@ -241,6 +260,7 @@ static void received(const u8 *p, int n) {
         phase = 3;
         ip = offer;
         gateway = g;
+        web_config(ip, mask, gateway, ns, mac);
         lease_end = ticks + 60 * (lease > 86400 ? 86400 : lease);
         serial("DHCP lease acquired\r\n");
         if (g)
@@ -249,26 +269,34 @@ static void received(const u8 *p, int n) {
         phase = 0;
 }
 void network_poll(void) {
-    if (!nic)
+    if (!nic && !eport)
         return;
-    for (int i = 0; i < 4; i++) {
-        u16 s = rx[ri].status;
-        if (s & 0x8000)
-            break;
-        __sync_synchronize();
-        int n = (rx[ri].msg & 4095) - 4;
-        if ((s & 0x4300) == 0x300 && n >= 0 && n <= 1532)
-            received(rxb[ri], n);
-        rx[ri].msg = 0;
-        __sync_synchronize();
-        rx[ri].status = 0x8000;
-        ri = (ri + 1) & 3;
+    if (eport)
+        epoll();
+    else
+        for (int i = 0; i < 4; i++) {
+            u16 s = rx[ri].status;
+            if (s & 0x8000)
+                break;
+            __sync_synchronize();
+            int n = (rx[ri].msg & 4095) - 4;
+            if ((s & 0x4300) == 0x300 && n >= 0 && n <= 1532)
+                received(rxb[ri], n);
+            rx[ri].msg = 0;
+            __sync_synchronize();
+            rx[ri].status = 0x8000;
+            ri = (ri + 1) & 3;
+        }
+    if ((phase == 1 || phase == 2) && (int)(ticks - retry_at) >= 0) {
+        retry_at = ticks + 90;
+        dhcp(phase == 2);
     }
     if (phase > 0 && phase < 3 && (int)(ticks - deadline) >= 0)
         phase = 0;
     if (phase == 3 && (int)(ticks - lease_end) >= 0) {
         phase = 0;
         ip = gateway = 0;
+        web_config(0, 0, 0, 0, mac);
         neighbour = 0;
     }
 }
@@ -287,20 +315,22 @@ static char *iptext(char *p, u32 a) {
     return p;
 }
 void network_cmd(int acquire, void (*line)(const char *)) {
-    if (!nic) {
-        line("No supported AMD PCnet adapter bound.");
+    if (!nic && !eport) {
+        line("No supported Ethernet adapter bound.");
         return;
     }
     if (acquire) {
+        web_config(0, 0, 0, 0, mac);
         ip = gateway = neighbour = 0;
         phase = 1;
         xid = 0x46524553 ^ ticks ^ netint(mac + 2, 4);
         deadline = ticks + 600;
+        retry_at = ticks + 90;
         dhcp(0);
     }
     if (phase != 3) {
         line(phase ? "DHCP in progress; type net to check."
-                   : "PCnet ready / no lease. Use net dhcp.");
+                   : "Ethernet ready / no lease. Use net dhcp.");
         return;
     }
     char buf[64];
@@ -311,4 +341,21 @@ void network_cmd(int acquire, void (*line)(const char *)) {
     p = iptext(p, gateway);
     cat(p, neighbour ? " / reachable" : " / not confirmed");
     line(buf);
+}
+
+int lan_send(const u8 *f, int n) {
+    if ((!nic && !eport) || n < 14 || n > 1518 || txbusy())
+        return 0;
+    for (int i = 0; i < n; i++)
+        txb[ti & 1][i] = f[i];
+    transmit(n);
+    return 1;
+}
+static void ignore_net(const char *s) { (void)s; }
+int lan_acquire(void) {
+    if (!nic && !eport)
+        return 0;
+    if (phase == 0)
+        network_cmd(1, ignore_net);
+    return 1;
 }

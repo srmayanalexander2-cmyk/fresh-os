@@ -2,7 +2,34 @@
  * session keeps its last linked IMP in memory even without a writable disk. */
 static char linked_name[32], document[32] = "note.txt", feedback[124], lastnotice[124];
 static u32 linked_size;
-static char recent[12][32];
+static char recent[12][32], directory[128][32];
+static int nfiles;
+/* Sorted distinct names, not a list of save records. Limit the synchronous disk scan. */
+static int name_order(const char *a, const char *b) {
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    return (u8)*a - (u8)*b;
+}
+static void collect_name(const char *s) {
+    int i = 0;
+    while (i < nfiles && name_order(directory[i], s) < 0)
+        i++;
+    if (i < nfiles && eq(directory[i], s))
+        return;
+    if (nfiles == 128)
+        return;
+    for (int j = nfiles; j > i; j--)
+        copy(directory[j], directory[j - 1], 32);
+    copy(directory[i], s, 32);
+    nfiles++;
+}
+static void directory_refresh(void) {
+    nfiles = 0;
+    home_scan(collect_name, 2048);
+}
+
 static int nrecent, filetab, fileidx, editpos, savebox, ctrl;
 static char savename[32], pending_doc[32];
 static int modified;
@@ -34,6 +61,8 @@ static void add_recent(const char *s) {
     copy(recent[nrecent++], s, 32);
 }
 static void file_refresh(void) {
+    if (filetab == 3)
+        directory_refresh();
     nrecent = 0;
     if (linked_size)
         add_recent(linked_name);
@@ -41,12 +70,16 @@ static void file_refresh(void) {
     last_file = -1;
 }
 static int filecount(void) {
-    return filetab == 2 ? 0 : filetab ? nrecent : (int)(sizeof library / sizeof *library);
+    return filetab == 3   ? nfiles
+           : filetab == 2 ? 0
+           : filetab      ? nrecent
+                          : (int)(sizeof library / sizeof *library);
 }
 static const char *selection(void) {
-    return fileidx >= 0 && fileidx < filecount()
-               ? (filetab ? recent[fileidx] : library[fileidx])
-               : "";
+    return fileidx >= 0 && fileidx < filecount() ? (filetab == 3 ? directory[fileidx]
+                                                    : filetab    ? recent[fileidx]
+                                                                 : library[fileidx])
+                                                 : "";
 }
 static int get_program(const char *name, const u8 **data) {
     if (linked_size && eq(name, linked_name)) {
@@ -91,6 +124,13 @@ static int load_photo(const char *);
 static void open_file(const char *name) {
     if (!*name)
         return;
+    if (suffix(name, ".html") || suffix(name, ".htm")) {
+        char url[40] = "home:";
+        copy(url + 5, name, sizeof url - 5);
+        launch(BROWSER);
+        navigate(url, 1);
+        return;
+    }
     if (suffix(name, ".bmp")) {
         if (load_photo(name))
             launch(PHOTOS);

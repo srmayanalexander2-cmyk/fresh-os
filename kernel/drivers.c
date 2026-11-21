@@ -258,10 +258,15 @@ static void probe(u32 d, u32 id) {
         if (satacap)
             kind = "AHCI / SATA bound";
     }
-    if (id == 0x20001022 && !nic) {
+    if (id == 0x20001022 && !nic && !eport) {
         pcnet(d);
         if (nic)
             kind = "PCnet / Ethernet bound";
+    }
+    if (id == 0x100e8086 && !nic && !eport) {
+        e1000(d);
+        if (eport)
+            kind = "82540EM / Ethernet bound";
     }
     if (id == 0x24158086 && !bus) {
         ac97(d);

@@ -346,12 +346,12 @@ int home_read(const char *name, void *dest, u32 cap) {
     }
     return -2;
 }
-int home_list(void (*emit)(const char *)) {
+int home_scan(void (*emit)(const char *), u32 limit) {
     if (!mounted)
         return 0;
     u32 pos = fs.last;
     struct Record r;
-    for (u32 i = 0; pos && i < fs.count && i < 10; i++) {
+    for (u32 i = 0; pos && i < fs.count && i < limit; i++) {
         if (!next(pos, &r))
             return 0;
         emit(r.name);
@@ -359,6 +359,7 @@ int home_list(void (*emit)(const char *)) {
     }
     return 1;
 }
+int home_list(void (*emit)(const char *)) { return home_scan(emit, 10); }
 /* Only a disk explicitly stamped by new-target.py is eligible. Copy verified
  * sectors before publishing the bootable MBR. Power loss leaves the token intact. */
 static u32 install_lba, total;

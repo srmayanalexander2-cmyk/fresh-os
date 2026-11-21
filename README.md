@@ -1,4 +1,4 @@
-# FreshOS 1.4 · Native sky desktop
+# FreshOS 1.5 · Aero Browser
 
 A native, experimental x86 desktop built for the supplied cloud-and-glass design. The loaders, kernel, framebuffer renderer, input drivers, shell, app sessions, installer, Fresh Home filesystem and IMP linker and bounded x86 interpreter are written here. **It is not a Linux image, a browser kiosk, or a Windows distribution.** The OS does not require the internet to start.
 
@@ -15,7 +15,9 @@ Extract **one** ZIP64 archive. Each contains a bootable `.iso`, exactly **8,000,
 
 **What occupies the space:** the native BIOS payload is under 4 MB; the hybrid image also carries an 8 MiB FAT16 EFI system partition. At byte 16,777,216 begins the writable **Fresh Home** partition. Its initially empty space is why the downloads compress well. This is 8 GB of *disk capacity*, not 8 GB of implemented software. An optical drive is read-only; user data needs a writable, supported disk. The compact developer build omits Home and cannot be installed with the native installer.
 
-**New in 1.4:** `exit`, Esc, and the Desktop button leave the command desktop. Files → Drives distinguishes detected hardware, protected foreign disks, a prepared installer target, and mounted Home. Open Settings → More settings for auto-hide, fill vs aspect-preserving scaling, and soft/silent feedback. [Details, limits and remaining requests](docs/usability.md).
+**New in 1.5, in every edition:** Aero Browser fetches real HTTP pages over PCnet or Intel 82540EM Ethernet, renders text and links, and runs inline JavaScript in a bounded MicroQuickJS worker. Open `browser` and press Ctrl+L. Files now has a sorted Home directory; the shell adds file copy, comparison, search, hex display and page-text export. [Try it, see the guest screenshot and check the limits](docs/aero.md). This is not a Chrome-equivalent or HTTPS browser.
+
+**In 1.4:** `exit`, Esc, and the Desktop button leave the command desktop. Files → Drives distinguishes detected hardware, protected foreign disks, a prepared installer target, and mounted Home. Open Settings → More settings for auto-hide, fill vs aspect-preserving scaling, and soft/silent feedback. [Details, limits and remaining requests](docs/usability.md).
 
 **In 1.3:** four virtual desktops, six native utility sessions, screen capture, clipboard, on-screen keyboard, alarms, SHA3-256 and TAR/gzip creation. See [controls and limits](#3--use-the-desktop) and the [full Windows request checklist](docs/coverage.md).
 
@@ -101,4 +103,4 @@ python3 -m venv .venv
 
 [Feature-by-feature status](docs/coverage.md) tracks the Windows wishlist, including removed items. [Source requirements](docs/requested-features.txt) is the original list. The earlier transcript describes a different, unavailable implementation: this checkout started with an eleven-byte README. Its test counts and release claims are **not** inherited.
 
-This is an experimental native OS, not a production Windows replacement. There is no arbitrary EXE/IMP or Linux desktop compatibility layer, general-purpose TCP/IP stack, web browser, integrated laptop Wi-Fi driver, general USB drivers, per-process protection, antivirus, or enterprise management stack. Do not use it for irreplaceable files. No Windows source or system binaries are included. The supplied cloud artwork is used as visual source material; glyphs are rasterized from DejaVu Sans (see `docs/licenses/DejaVu.txt`).
+This is an experimental native OS, not a production Windows replacement. There is no arbitrary EXE/IMP or Linux desktop compatibility layer, TLS-enabled modern web platform, integrated laptop Wi-Fi driver, general USB drivers, per-process protection, antivirus, or enterprise management stack. Do not use it for irreplaceable files. No Windows source or system binaries are included. The supplied cloud artwork is used as visual source material; glyphs are rasterized from DejaVu Sans (see `docs/licenses/DejaVu.txt`).

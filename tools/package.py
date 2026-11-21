@@ -26,6 +26,12 @@ def pack(edition):
         check = f"{digest.hexdigest()}  {iso.name}\n"
         z.writestr("SHA256SUMS.txt", check)
         z.write(ROOT / "README.md", "README.txt")
+        z.write(ROOT / "docs/aero.md", "AERO-BROWSER.txt")
+        # Include upstream sources/notices, including per-file libm and lwIP notices.
+        for tree in ("third_party", "tools/aero-engine"):
+            for src in sorted((ROOT / tree).rglob("*")):
+                if src.is_file() and "__pycache__" not in src.parts:
+                    z.write(src, "browser-source/" + src.relative_to(ROOT).as_posix())
         z.write(ROOT / "docs/coverage.md", "FEATURES.txt")
         z.write(ROOT / "docs/usability.md", "DESKTOP-AND-STORAGE.txt")
         z.write(ROOT / "docs/licenses/DejaVu.txt", "FONT-LICENSE.txt")

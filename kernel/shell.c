@@ -2,6 +2,8 @@
 #include "packages.h"
 #include "compat.h"
 #include "filetools.h"
+#include "aerojs.h"
+#include "webnet.h"
 static u8 imported[IMP_LIMIT], converted[IMP_LIMIT];
 static PeResult pe_result;
 static int pe_ran, pe_ok, last_imp;
@@ -38,6 +40,7 @@ enum {
     CENTER,
     PHOTOS,
     SOFTWARE,
+    BROWSER,
     NAPPS
 };
 struct App {
@@ -64,7 +67,8 @@ static const struct App apps[] = {{"Files", "files", "F", 0xf2c443},
                                   {"Events", "events", "E", 0x67bbca},
                                   {"Actions", "actions", "+", 0x81cba9},
                                   {"Photos", "photos", "", 0x96d4ba},
-                                  {"Software", "software", "", 0xb1dcea}};
+                                  {"Software", "software", "", 0xb1dcea},
+                                  {"Aero Browser", "browser", "", 0x55aade}};
 static int welcome = 1, active = -1, hidden[NAPPS], menu, tray, choice, cli, shutdown, widget,
            wall, color, motion = !LITE, dim = 10, vol = 5, dirty = 1;
 static int wx = (W - 506) / 2, wy = (H - 311) / 2, dgx, dgy, drag, shift, caps, progress,
@@ -161,12 +165,14 @@ static int actions_from = -1;
 static int desk, owner[NAPPS], foreground[NDESKS] = {-1, -1, -1, -1}, deskx[NDESKS],
                                desky[NDESKS], overview, focusdesk, winheld, winused, osk;
 static void launch(int);
+static void navigate(const char *, int);
 #include "workspace.inc"
 #include "organizer.inc"
 #include "archive.inc"
 #include "alarms.inc"
 #include "packages.inc"
 #include "commands.inc"
+#include "aeropage.inc"
 static void launch(int id) {
     if (id < 0 || id >= NAPPS)
         return;
@@ -182,6 +188,8 @@ static void launch(int id) {
     lift = motion ? 22 : 0;
     lift_speed = 0;
     hidden[id] = 0;
+    if (id == BROWSER && !location[0])
+        navigate("aero:home", 1);
     if (id == SOFTWARE)
         shelf_refresh();
     if (id == FILES) {
@@ -478,6 +486,47 @@ static void command(void) {
         s[1] = 'a';
         s[2] = 't';
     }
+    if (prefix(s, "browse ")) {
+        launch(BROWSER);
+        navigate(s + 7, 1);
+        return;
+    }
+    if (prefix(s, "js ") || prefix(s, "jsfile ")) {
+        const char *code = s + 3;
+        if (prefix(s, "jsfile ")) {
+            int n = home_read(s + 7, script, JS_SOURCE_MAX);
+            if (n < 0) {
+                say("Script missing or too large.");
+                return;
+            }
+            script[n] = 0;
+            code = script;
+        }
+        const char *err =
+            aero_eval(imported, AERO_ENGINE, AERO_ENGINE_SIZE, code, jsout, JS_OUT_CAP);
+        if (err)
+            say(err);
+        if (jsout[0])
+            say(jsout);
+        return;
+    }
+    if (eq(s, "pageinfo")) {
+        say(location);
+        say(title);
+        say(notice);
+        say(body);
+        return;
+    }
+    if (prefix(s, "savepage ")) {
+        const char *dest = s + 9;
+        u8 unused;
+        if (!bodylen || !suffix(dest, ".txt") || home_read(dest, &unused, 0) != -2 ||
+            !home_save(dest, body, bodylen))
+            say("Use a new .txt name on writable Home and open a page first.");
+        else
+            notify("Page text saved to Fresh Home.");
+        return;
+    }
     if (shell_tools(s))
         return;
     if (eq(s, "desktops")) {
@@ -508,12 +557,13 @@ static void command(void) {
     }
     if (eq(s, "help drivers")) {
         say("drivers - PCI function IDs and bound drivers. vmtools - guest status.");
-        say("net dhcp | net - PCnet network. wifi scan/join/ip/leave - COM2 ESP-AT.");
+        say("net dhcp | net - PCnet or Intel 82540EM Ethernet. wifi scan/join/ip/leave - "
+            "COM2 ESP-AT.");
         say("bt info | bt scan - Bluetooth COM3 H4. open chime.wav - PCM output.");
         return;
     }
     if (eq(s, "uname") || eq(s, "ver")) {
-        say("FreshOS 1.4 / " EDITION " / native x86 kernel");
+        say("FreshOS 1.5 / " EDITION " / native x86 kernel");
         return;
     }
     if (eq(s, "dir"))
@@ -595,11 +645,13 @@ static void command(void) {
         say("START  |  Type an app name, then Enter.");
         say("files   writer   paint   calc   clock   settings   term   mines   system");
         say("calendar   monitor   programs   connections   sticky   todo   charmap");
-        say("tips   events   actions   photos   software   /   desktops   osk   /   more: "
+        say("tips   events   actions   browser   photos   software   /   desktops   osk   /  "
+            " more: "
             "utilities");
     } else if (eq(s, "help")) {
         say("exit - return to desktop | doctor, disks, history, uptime, wc, stat, head, "
             "tail, pkg");
+        say("help files | help web - file utilities, Aero navigation and JavaScript");
         say("utilities - desktop tools, clipboard, archives and hashes");
         say("help keys | help drivers | lspci | ver | pwd | dir | cat FILE.txt | echo TEXT");
         say("start / apps   open NAME   tasks   resume NAME   clear   gui   cli");
@@ -615,7 +667,10 @@ static void command(void) {
         say(home_save("canvas", paint, sizeof paint) ? "Canvas saved."
                                                      : "Canvas not saved. Type storage.");
     else if (eq(s, "ls")) {
-        if (!home_list(say))
+        directory_refresh();
+        for (int i = 0; i < nfiles; i++)
+            say(directory[i]);
+        if (!home_ready())
             say("No Fresh Home mounted.");
     } else if (prefix(s, "save ")) {
         write_document(s + 5);
@@ -694,8 +749,8 @@ static void icon(int x, int y, int i, int r) {
         return;
     }
     if (i >= STICKY) {
-        static const u16 *const extra[] = {ICON12, ICON13, ICON14, ICON15,
-                                           ICON16, ICON17, ICON18, ICON19};
+        static const u16 *const extra[] = {ICON12, ICON13, ICON14, ICON15, ICON16,
+                                           ICON17, ICON18, ICON19, ICON20};
         sprite(extra[i - STICKY], 64, 64, x, y, r, r, 1);
         return;
     }
@@ -887,6 +942,7 @@ static void wrapped(int x, int y, int width, const char *s) {
 #include "capture.inc"
 #include "keyboard.inc"
 #include "chrome.inc"
+#include "aeroview.inc"
 static void window(void) {
     struct Bounds f = frame();
     int x = f.x, y = f.y, w = f.w, h = f.h, a = active;
@@ -899,6 +955,8 @@ static void window(void) {
     pill(x + w - 111, y + 3, 41, 21, "-", 0);
     pill(x + w - 56, y + 3, 41, 21, "x", 0);
     int xx = x + (w - 506) / 2 + 19, yy = y + (h - 311) / 2 + 45;
+    if (a == BROWSER)
+        browser_draw(x + 3, y + 32, w - 6, h - 36);
     if (a == PHOTOS)
         photo_draw(xx, yy);
     if (a == SOFTWARE)
@@ -1431,6 +1489,10 @@ void pointer(int old, int x, int y) {
         context_action(2);
         return;
     }
+    if (active == BROWSER) {
+        browser_click(rx - 3, ry - 32, f.w - 6, f.h - 36);
+        return;
+    }
     if (active == SOFTWARE) {
         shelf_click(a, b);
         return;
@@ -1772,6 +1834,10 @@ void key(int k, int down) {
         hide(0);
         return;
     }
+    if (k == 1 && active == BROWSER && editing && !tray && !menu) {
+        browser_key(k, 0);
+        return;
+    }
     if (k == 1) {
         if (tray)
             tray = 0;
@@ -1813,6 +1879,10 @@ void key(int k, int down) {
         c -= 32;
     else if (caps && c >= 'A' && c <= 'Z')
         c += 32;
+    if (active == BROWSER) {
+        browser_key(k, c);
+        return;
+    }
     if (active == SOFTWARE) {
         if (k == 28)
             shelf_action("run ");
@@ -1892,7 +1962,7 @@ void key(int k, int down) {
     if (active == FILES) {
         int n = filecount();
         if (k == 15) {
-            filetab = (filetab + 1) % 3;
+            filetab = (filetab + 1) % 4;
             file_refresh();
             fileidx = 0;
         } else if (n) {
@@ -1981,6 +2051,7 @@ void main(void) {
         poll();
         radios_poll();
         network_poll();
+        web_update();
         u32 now = ticks;
         if (feedback[0] && (int)(now - feedback_until) >= 0) {
             feedback[0] = 0;

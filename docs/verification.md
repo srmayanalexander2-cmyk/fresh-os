@@ -1,4 +1,17 @@
-# FreshOS 1.4 verification
+# FreshOS 1.5 verification
+
+| Test on release media | Evidence |
+|---|---|
+| All four editions | Normal, Lite, VMware and VMware-Lite passed the full-media structural check. Each booted under QEMU BIOS and x64 UEFI, passed the existing interactive smoke test on both, and passed `tests/browser.py` on both. These are tests of the ISO kernels, not a host-browser mock. |
+| Two Ethernet drivers | BIOS/PCnet and UEFI/82540EM guests acquired DHCP, connected to a host-side HTTP server, received HTML, computed a new title from a per-run random integer, followed a relative link, went Back, and reported a 404. The server asserted the actual request paths. Additional Normal UEFI checks rejected compressed, incomplete and oversized responses and then loaded another good page. [Framebuffer capture](screens/aero.jpg). |
+| DNS | A controlled Ethernet peer supplied its resolver in a DHCP reply. `tests/browser_dns.py` observed the guest's on-wire A query for `test.freshos`, returned a test address, and observed a TCP SYN to that address on port 80. No public resolver or internet connection required. |
+| Local files | A disk contained a local HTML file older than the ten-entry Recent view. A guest opened it from the sorted Home directory, evaluated its script, exported the resulting text, copied the file, and refused to overwrite the copy. Independent disk inspection verified `Local answer = 42` and the copy record. |
+| Worker | `tests/aerojs.py` ran the checked-in engine via the same interpreter used by the kernel. Function calls, arrays, numeric conversion, exception handling, input and instruction limits, missing host APIs and fresh globals passed. Rebuilding the worker with Zig 0.13.0 produced identical packed bytes. |
+| Regressions | Compatibility, file tools, shell file commands, desktop, utilities, usability, VMware pointer and alternate-position VMDK checks passed. VMware-Lite passed BIOS virtio and UEFI SATA device/installation tests and the UEFI IDE install/persistence smoke. The Normal payload booted in the v86 preview. Not certification of physical hardware or a run in VMware Workstation/Fusion. |
+
+See [Aero controls, limits and test commands](aero.md). These tests establish a small in-guest HTTP/text/JavaScript browser, **not** Chrome or modern web compatibility.
+
+## FreshOS 1.4 verification
 
 | Final-media check | Result and boundary |
 |---|---|

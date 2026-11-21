@@ -2,6 +2,7 @@
 
 import struct, subprocess
 from pathlib import Path
+from netbuild import NET_SOURCES, NET_FLAGS
 from editions import lite
 from art import ROOT
 
@@ -68,6 +69,7 @@ def efi(build, edition):
     objs = []
     for src in [
         ROOT / "boot/uefi.c",
+        *NET_SOURCES,
         ROOT / "kernel/entry64.S",
         ROOT / "kernel/platform.c",
         ROOT / "kernel/shell.c",
@@ -90,6 +92,7 @@ def efi(build, edition):
             "-ffreestanding",
             "-fpie",
             "-mno-red-zone",
+            *NET_FLAGS,
             "-mgeneral-regs-only",
             "-fno-asynchronous-unwind-tables",
             "-fno-stack-protector",
@@ -106,6 +109,9 @@ def efi(build, edition):
             "-o",
             obj,
         )
+    relocations = subprocess.check_output(["objdump", "-r", *objs], cwd=build)
+    if b"GOTPCREL" in relocations:
+        raise ValueError("EFI object requires an ELF GOT; declare built-in callbacks hidden")
     run(
         "ld",
         "-mi386pep",

@@ -57,7 +57,7 @@ def bake(build, lite, wallpaper=None):
         with Image.open(glyph) as art:
             asset("GL_" + glyph.stem.upper(), art)
     icons = atlas()
-    for i in range(20):
+    for i in range(21):
         asset(f"ICON{i}", icons.crop((i * 64, 0, (i + 1) * 64, 64)))
     for label, sz, bold in [
         ("small", 11, False),
@@ -82,5 +82,8 @@ def bake(build, lite, wallpaper=None):
             f"#define {label}_font {{ {w}, {h}, {label}_advance, art+{len(blob)} }}"
         )
         blob.extend(ims.tobytes())
+    engine = (ROOT / "assets/aero-js.lz4").read_bytes()
+    header += [f"#define AERO_ENGINE (art+{len(blob)})", f"#define AERO_ENGINE_SIZE {len(engine)}"]
+    blob.extend(engine)
     (build / "art.bin").write_bytes(blob)
     (build / "art.h").write_text("extern const u8 art[];\n" + "\n".join(header) + "\n")
