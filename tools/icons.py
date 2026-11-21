@@ -6,7 +6,7 @@ import math
 
 def atlas():
     icons = []
-    for n in range(18):
+    for n in range(20):
         im = Image.new("RGB", (64, 64), (255, 0, 255))
         d = ImageDraw.Draw(im)
 
@@ -136,6 +136,8 @@ def atlas():
                 (233, 182, 65),
                 (96, 147, 160),
                 (77, 172, 185),
+                (92, 158, 214),
+                (154, 121, 207),
             ][n - 12]
             panel((6, 5, 58, 58), 9, tuple(min(255, c + 68) for c in tint), tint)
             ink = "#184857"
@@ -157,6 +159,14 @@ def atlas():
                 for y in (19, 31, 43):
                     d.ellipse((14, y, 19, y + 5), fill="white")
                     d.line((25, y + 2, 48, y + 2), fill=ink, width=3)
+            if n == 18:
+                d.ellipse((17, 14, 27, 24), fill="white")
+                d.polygon(
+                    [(12, 47), (28, 31), (33, 37), (42, 26), (53, 47)], fill="#227d74"
+                )
+            if n == 19:
+                d.rounded_rectangle((13, 25, 51, 49), radius=4, fill="#ffebb6")
+                d.line((21, 25, 21, 18, 43, 18, 43, 25), fill=ink, width=4)
             if n == 17:
                 for y, x in [(20, 35), (32, 23), (44, 40)]:
                     d.line((14, y, 50, y), fill=ink, width=3)

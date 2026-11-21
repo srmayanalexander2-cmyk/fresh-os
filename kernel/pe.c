@@ -1107,6 +1107,11 @@ static const char *imp_load(VM *v, const u8 *f, u32 n) {
     clear(heap, sizeof heap);
     return 0;
 }
+const char *imp_check(const u8 *f, u32 n) {
+    PeResult r = {0};
+    VM v = {.res = &r};
+    return imp_load(&v, f, n);
+}
 int imp_run(const u8 *f, u32 n, PeResult *r) {
     clear((u8 *)r, sizeof *r);
     VM v = {.res = r, .budget = STEPS};

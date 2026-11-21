@@ -3,6 +3,8 @@
 Status of this build, not the unavailable system described in `take.txt`. **Partial** means a specific FreshOS counterpart exists, not Windows API or binary compatibility. Unimplemented entries are not registered as fake apps.
 
 
+See [the 1.4 usability update and outstanding requests](usability.md) for the later, expanded list.
+
 ## Windows 10 (Version 1507) Features
 
 | Request | Status |
@@ -30,7 +32,7 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 | Request | Status |
 |---|---|
 | Scrollable Quick Settings flyout with reorderable toggles | Actions shows four rows at a time; arrows scroll, Shift+arrows reorder. Order is session-only. |
-| File Explorer context menu text labels beneath top-row icons | Partial: Files launches the session note and canvas; Home commands manage named records. |
+| File Explorer context menu text labels beneath top-row icons | Partial: Files has Library, Recent and Drives, EXE conversion, BMP viewing and IMP installation; not full Explorer. |
 | Native 7-Zip and TAR archive creation (.7z, .tar, .gz, .bz2, .xz, .zst) | Partial: create interoperable ustar and stored-block gzip in writable Home (256 KiB output cap); no extraction, .7z, .bz2, .xz or .zst. |
 | Energy Saver mode (for both laptops and desktops) | Partial: a shell preset dims the display and disables animation. No CPU, battery or firmware power policy. |
 | Content Adaptive Brightness Control (CABC) on AC power | Not implemented. |
@@ -109,7 +111,7 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 | Request | Status |
 |---|---|
 | Alarms & Clock | Local RTC clock, one-shot alarm and countdown while the kernel is running; no wake or background scheduling after shutdown. |
-| App Installer | Not implemented. |
+| App Installer | Software installs, runs and removes local IMP packages on Home. No MSI, MSIX or online store. |
 | Calculator | Partial: native integer four-function calculator. |
 | Camera | Not implemented. |
 | Character Map | 95 printable ASCII glyphs; mouse or keyboard selection copies the character to the session clipboard. No Unicode font browser. |
@@ -123,7 +125,7 @@ Status of this build, not the unavailable system described in `take.txt`. **Part
 | Disk Management | Not implemented. |
 | Event Viewer | Shows the last 32 timestamped shell events; no persistent system or security log. |
 | Feedback Hub | Not implemented. |
-| File Explorer | Partial: Files launches the session note and canvas; Home commands manage named records. |
+| File Explorer | Partial: Files has Library, Recent and Drives, EXE conversion, BMP viewing and IMP installation; not full Explorer. |
 | Films & TV (Movies & TV) | Not implemented. |
 | Game Bar (Xbox Game Bar) | Not implemented. |
 | Get Help | Not implemented. |

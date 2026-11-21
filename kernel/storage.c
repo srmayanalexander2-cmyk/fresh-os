@@ -2,8 +2,13 @@
 #include "storage.h"
 #include "drivers.h"
 static int transport;
-#define ATA 0x1f0
-#define CD 0x170
+/* The four legacy IDE positions may contain a disk, packet device, or nothing. */
+static int ata_slot, cd_slot;
+static u32 ide_capacity[4];
+static int packet_slot[4];
+static const char *const locations[] = {"IDE 0:0", "IDE 0:1", "IDE 1:0", "IDE 1:1"};
+#define ATA (ata_slot < 2 ? 0x1f0 : 0x170)
+#define CD (cd_slot < 2 ? 0x1f0 : 0x170)
 #define HOME 32768u
 #define CAP_SECTORS 15625000u
 #define FIRST (HOME + 2)
@@ -41,15 +46,17 @@ static int wait(int p, int drq) {
     } while ((u32)(ticks - start) < 300);
     return 0;
 }
-static int ident(u32 *capacity) {
-    wr(ATA + 6, 0xa0);
+static int ident(int packet, u32 *capacity) {
+    wr(ATA + 6, 0xa0 | ((ata_slot & 1) << 4));
     delay(ATA);
-    wr(ATA + 7, 0xec);
+    wr(ATA + 7, packet ? 0xa1 : 0xec);
     if (!wait(ATA, 1))
         return 0;
     u16 id[256];
     for (int i = 0; i < 256; i++)
         id[i] = word(ATA);
+    if (packet)
+        return (id[0] & 0x8000) != 0;
     if (!(id[49] & 0x200))
         return 0;
     *capacity = id[60] | ((u32)id[61] << 16);
@@ -63,7 +70,7 @@ static int sector(u32 lba, void *buf, int write) {
     if (transport)
         return vblk_io(lba, buf, write);
     u8 *d = buf;
-    wr(ATA + 6, 0xe0 | ((lba >> 24) & 15));
+    wr(ATA + 6, 0xe0 | ((ata_slot & 1) << 4) | ((lba >> 24) & 15));
     delay(ATA);
     wr(ATA + 2, 1);
     wr(ATA + 3, lba);
@@ -94,7 +101,7 @@ static int flush(void) {
     return wait(ATA, 0);
 }
 static int cdread(u32 lba, u8 *buf) {
-    wr(CD + 6, 0xa0);
+    wr(CD + 6, 0xa0 | ((cd_slot & 1) << 4));
     delay(CD);
     wr(CD + 1, 0);
     wr(CD + 4, 0);
@@ -176,18 +183,42 @@ void storage_init(void) {
     u8 sec[512];
     struct Super a, b;
     mounted = marked = 0;
+    int selected = -1;
+    status = "No supported disk. Attach FreshTarget.vmdk (IDE) or use SATA/AHCI.";
     transport = 0;
-    if (!ident(&capacity) || capacity < CAP_SECTORS || !sector(0, sec, 0) ||
-        !(token(sec) || media(sec))) {
+    for (ata_slot = 0; ata_slot < 4; ata_slot++) {
+        ide_capacity[ata_slot] = 0;
+        packet_slot[ata_slot] = 0;
+        if (!ident(0, &ide_capacity[ata_slot])) {
+            packet_slot[ata_slot] = ident(1, &capacity);
+            continue;
+        }
+        if (selected < 0 && ide_capacity[ata_slot] >= CAP_SECTORS && sector(0, sec, 0) &&
+            (token(sec) || media(sec)))
+            selected = ata_slot;
+        status = "Disk detected, but not an eligible FreshOS disk. No changes made.";
+    }
+    if (selected >= 0) {
+        ata_slot = selected;
+        capacity = ide_capacity[selected];
+    } else {
         for (transport = 1; transport <= 2; transport++) {
             capacity = transport == 1 ? vblk_size() : sata_size();
-            if (capacity >= CAP_SECTORS && sector(0, sec, 0) && (media(sec) || token(sec)))
+            if (!capacity)
+                continue;
+            status = "Disk detected, but not an eligible FreshOS disk. No changes made.";
+            if (capacity >= CAP_SECTORS && sector(0, sec, 0) && (token(sec) || media(sec)))
                 break;
         }
         if (transport > 2) {
             transport = 0;
+            ata_slot = 0;
             return;
         }
+    }
+    if (!sector(0, sec, 0)) {
+        status = "Disk read error at sector zero.";
+        return;
     }
     if (token(sec)) {
         marked = 1;
@@ -196,6 +227,7 @@ void storage_init(void) {
     }
     if (!media(sec))
         return;
+    status = "FreshOS disk detected; Home headers unreadable or damaged.";
     if (!sector(HOME, &a, 0) || !sector(HOME + 1, &b, 0))
         return;
     int av = valid(&a), bv = valid(&b);
@@ -205,7 +237,27 @@ void storage_init(void) {
     mounted = 1;
     status = transport == 2 ? "Fresh Home mounted (AHCI/SATA)."
              : transport    ? "Fresh Home mounted (virtio-blk)."
-                            : "Fresh Home mounted (primary IDE).";
+                            : "Fresh Home mounted (IDE).";
+}
+void storage_list(void (*emit)(const char *)) {
+    for (int i = 0; i < 4; i++)
+        if (packet_slot[i] || ide_capacity[i]) {
+            char line[64];
+            int p = 0;
+            const char *t = locations[i];
+            while (*t)
+                line[p++] = *t++;
+            t = packet_slot[i] ? "  ATAPI optical drive" : "  ATA disk";
+            while (*t)
+                line[p++] = *t++;
+            line[p] = 0;
+            emit(line);
+        }
+    if (vblk_size())
+        emit("PCI  virtio block disk");
+    if (sata_size())
+        emit("PCI  AHCI SATA disk");
+    emit(status);
 }
 int home_ready(void) { return mounted; }
 const char *disk_status(void) { return status; }
@@ -314,11 +366,14 @@ static u8 data_cd[2048], mbr[512];
 static int copying;
 int install_probe(void) {
     if (!marked) {
-        status = "Needs a marked IDE, SATA or virtio target.";
+        /* Keep the discovery reason; never offer to initialize an ordinary disk. */
         return 0;
     }
-    if (!cdread(0, data_cd) || !media(data_cd)) {
-        status = "FreshOS CD must be secondary IDE master.";
+    for (cd_slot = 0; cd_slot < 4; cd_slot++)
+        if (packet_slot[cd_slot] && cdread(0, data_cd) && media(data_cd))
+            break;
+    if (cd_slot == 4) {
+        status = "Target found. Attach the full FreshOS ISO to an IDE CD drive.";
         return 0;
     }
     for (int i = 0; i < 512; i++)
@@ -350,6 +405,7 @@ int install_step(void) {
     u8 check[512];
     for (int n = 0; n < 16 && install_lba < total; n++, install_lba++) {
         if (!cdread(install_lba, data_cd)) {
+            status = "Install stopped: source optical sector unreadable.";
             serial("install: optical read failed\r\n");
             goto bad;
         }
@@ -359,14 +415,17 @@ int install_step(void) {
                 continue;
             u8 *s = data_cd + 512 * j;
             if (!sector(l, s, 1)) {
+                status = "Install stopped: target sector write failed.";
                 serial("install: target write failed\r\n");
                 goto bad;
             }
             if (!sector(l, check, 0)) {
+                status = "Install stopped: target sector readback failed.";
                 serial("install: target read failed\r\n");
                 goto bad;
             }
             if (!same(check, s, 512)) {
+                status = "Install stopped: disk readback differed from the ISO.";
                 serial("install: readback mismatch\r\n");
                 goto bad;
             }
@@ -376,6 +435,7 @@ int install_step(void) {
         return 0;
     struct Super a = {.magic = "FRSHOME1", .seq = 0, .tail = FIRST};
     a.hash = sum(BASIS, &a, 24);
+    status = "Install stopped: could not commit Home or boot sector.";
     if (!sector(HOME, &a, 1) || !sector(HOME + 1, &a, 1) || !flush() || !sector(0, mbr, 1) ||
         !flush())
         goto bad;
@@ -385,6 +445,6 @@ int install_step(void) {
     return 1;
 bad:
     copying = 0;
-    status = "Install I/O error. Installation did not complete.";
+
     return -1;
 }

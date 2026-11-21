@@ -33,6 +33,8 @@ jobs:
         run: |
           python tests/desktop.py out/FreshOS-VMware-Lite.iso
           python tests/utilities.py out/FreshOS-VMware-Lite.iso
+          python tests/usability.py out/FreshOS-VMware-Lite.iso
+          python tests/vmstorage.py out/FreshOS-VMware-Lite.iso build/VMware-Lite/vm/FreshTarget.vmdk
       - name: Exercise PCI devices, guest file consent, ELF and UART protocols
         if: matrix.edition == 'VMware-Lite'
         run: |

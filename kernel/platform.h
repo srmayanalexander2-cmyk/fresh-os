@@ -10,6 +10,7 @@ extern u32 screen[H][W];
 extern int mx, my, buttons;
 int display_flip_bind(u32 bar);
 const char *display_driver(void);
+void display_fit(int fill);
 void cursor_present(int visible, int fresh);
 void hw_init(void), present(void), serial(const char *), halt(void), key(int, int),
     pointer(int, int, int), rtc(int *, int *, int *, int *, int *);

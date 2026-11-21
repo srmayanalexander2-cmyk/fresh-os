@@ -11,6 +11,17 @@ static int tw(const char *s, int f) {
 static void centered(int cx, int y, const char *s, int f, u32 c) {
     text(cx - tw(s, f) / 2, y, s, f, c);
 }
+static void fit_label(int cx, int y, int width, const char *s, int f) {
+    char b[80];
+    copy(b, s, sizeof b);
+    if (tw(b, f) > width) {
+        int n = len(b);
+        while (n && tw(b, f) + tw("...", f) > width)
+            b[--n] = 0;
+        copy(b + n, "...", sizeof b - n);
+    }
+    centered(cx, y, b, f, INK);
+}
 static void glass(int x, int y, int w, int h, int r, u32 tint, int alpha) {
     for (int j = 0; j < h; j++) {
         int q = j < r ? r - j - 1 : j >= h - r ? j - h + r : 0;
@@ -96,12 +107,22 @@ static const struct {
             {2, 256, 40, 33, "Brightness"},   {2, 223, 40, 32, "Volume"},
             {2, 190, 40, 32, "Connections"}};
 static int dock_at(int x, int y) {
+    if (autohide && !railshown && !menu && !tray && !widget)
+        return -1;
     for (int i = 0; i < DOCK_COUNT; i++)
         if (inside(x, y, dock[i].x, dock[i].y, dock[i].w, dock[i].h))
             return i;
     return -1;
 }
 #define GLYPH(name, x, y, w, h) sprite(GL_##name, GL_##name##_W, GL_##name##_H, x, y, w, h, 1)
+static void arrow_glyph(const u16 *p, int sw, int sh, int x, int y, int w, int h, int flip) {
+    for (int j = 0; j < h; j++)
+        for (int i = 0; i < w; i++) {
+            u16 c = p[j * sh / h * sw + (flip ? w - 1 - i : i) * sw / w];
+            if (c != 0xf81f)
+                screen[y + j][x + i] = rgb(c);
+        }
+}
 static void sun(int x, int y) {
     gel(x - 8, y - 8, 16, 16, 8, WHITE, 0xffff43, 0xf1b234);
     for (int i = -1; i <= 1; i++) {
@@ -126,7 +147,7 @@ static void rail(void) {
         switch (i) {
         case DOCK_APPS:
             gel(-70, y - 23, 123, 122, 61, 0xcdfdff, 0x06dcff, 0x60e3ff);
-            GLYPH(APPS, 0, y + 23, 52, 42);
+            arrow_glyph(GL_APPS, GL_APPS_W, GL_APPS_H, 0, y + 23, 52, 42, menu);
             break;
         case DOCK_FILES:
         case DOCK_WRITER:
@@ -140,7 +161,7 @@ static void rail(void) {
                  i == DOCK_CLOCK ? 26 : 32);
             break;
         case DOCK_TRAY:
-            GLYPH(TRAY, 11, y + 3, 22, 24);
+            arrow_glyph(GL_TRAY, GL_TRAY_W, GL_TRAY_H, 11, y + 3, 22, 24, tray);
             break;
         case DOCK_NET:
             GLYPH(NETWORK, 7, y + 2, 30, 28);
@@ -159,21 +180,27 @@ static void rail(void) {
         text(65, yy + 3, dock[over].name, 1, INK);
     }
 }
-#define SL_X 102
+#define SL_X (W / 2 + 21)
 #define SL_LEN 180
-static int slider_y(void) { return widget == 1 ? 248 : 282; }
+static int slider_y(void) { return H - 99; }
 static int slide_grab;
 static void slider_draw(void) {
     int y = slider_y(), v = widget == 1 ? vol : dim;
     char pct[6];
     num(pct, v * 10);
     append(pct, 6, '%');
-    glass(53, y - 58, 269, 103, 34, 0xaff5f0, 238);
-    text(86, y - 44, widget == 1 ? "Volume" : "Brightness", 2, INK);
-    text(250, y - 39, pct, 1, INK);
-    gel(SL_X, y, SL_LEN, 9, 4, 0x679ca6, 0x7eb0bc, 0xbcdfe6);
+    /* Reference: yellow speech bubble, green/cyan level bar and the supplied smile. */
+    int x = SL_X - 18;
+    for (int j = 0; j < 27; j++)
+        box(x + 28, y + 36 + j, 36 - j, 1, 0xf3fb91);
+    gel(x, y - 44, SL_LEN + 38, 95, 39, WHITE, 0xf8ed49, 0xf4ff93);
+    gel(x - 39, y + 49, 70, 75, 32, WHITE, 0xfff666, 0xf8ff88);
+    GLYPH(SMILE, x - 30, y + 58, 52, 52);
+    text(SL_X, y - 37, widget == 1 ? "Volume" : "Brightness", 1, INK);
+    text(SL_X + 129, y - 37, pct, 1, INK);
+    gel(SL_X, y, SL_LEN, 28, 11, WHITE, 0x38d9fa, 0xadfdff);
     if (v)
-        gel(SL_X, y, v * 18, 9, 4, 0xd9ffd0, 0x46dca6, 0x25bfac);
-    gel(SL_X + v * 18 - 10, y - 6, 20, 21, 10, WHITE, 0xc0ffff, 0x63dddc);
-    text(91, y + 19, widget == 1 ? audio_name() : "Display luminance", 0, INK);
+        gel(SL_X, y, v * 18, 28, 11, WHITE, 0x50fb21, 0xc4ffc2);
+    box(SL_X + v * 18 - 1, y - 9, 2, 10, INK);
+    gel(SL_X + v * 18 - 5, y - 14, 10, 8, 4, WHITE, 0x85999c, 0xb5c2be);
 }

@@ -24,6 +24,7 @@ static struct __attribute__((packed)) {
 #endif
 } idt[256];
 #pragma GCC visibility push(hidden)
+extern const int fault_offsets[];
 extern void pit_isr(void), keyboard_isr(void), mouse_isr(void);
 #pragma GCC visibility pop
 static void gate(int i, void (*f)(void)) {
@@ -102,6 +103,26 @@ const char *display_driver(void) {
 u32 screen[H][W];
 int mx = W / 2, my = H / 2, buttons;
 #define VI(o, T) (*(volatile T *)(0x5200 + (o)))
+void display_fit(int fill) {
+    dw = sw;
+    dh = sh;
+    if (!fill) {
+        dh = sw * H / W;
+        if (dh > sh) {
+            dh = sh;
+            dw = sh * W / H;
+        }
+    }
+    offx = (sw - dw) / 2;
+    offy = (sh - dh) / 2;
+    for (int x = 0; x < dw; x++)
+        xmap[x] = x * W / dw;
+    if (!fill && (offx || offy))
+        for (int y = 0; y < sh; y++)
+            for (int x = 0; x < sw; x++)
+                if (x < offx || x >= offx + dw || y < offy || y >= offy + dh)
+                    fb[y * pitch + x] = 0;
+}
 void hw_init(void) {
     out(0x3f9, 0);
     out(0x3fb, 0x80);
@@ -118,16 +139,7 @@ void hw_init(void) {
     fb = (void *)VI(40, u32);
 
 #endif
-    dw = sw;
-    dh = sw * H / W;
-    if (dh > sh) {
-        dh = sh;
-        dw = sh * W / H;
-    }
-    offx = (sw - dw) / 2;
-    offy = (sh - dh) / 2;
-    for (int i = 0; i < dw; i++)
-        xmap[i] = i * W / dw;
+    display_fit(1);
     cmd(0xa8);
     cmd(0x20);
     int cfg = recv();
@@ -137,6 +149,8 @@ void hw_init(void) {
         aux(0xf6);
         aux(0xf4);
     }
+    for (int i = 0; i < 32; i++)
+        gate(i, (void (*)(void))((unsigned long)fault_offsets + fault_offsets[i]));
     gate(32, pit_isr);
     gate(33, keyboard_isr);
     gate(44, mouse_isr);

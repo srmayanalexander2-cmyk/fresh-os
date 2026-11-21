@@ -1,3 +1,6 @@
+static int paper_w(void) { return maximized[WRITER] ? W - (cli ? 40 : 94) : 466; }
+static int paper_h(void) { return maximized[WRITER] ? H - 127 : 184; }
+static int paper_rows(void) { return (paper_h() - 14) / 17; }
 /* Measurement and painting use the same wrapped lines as mouse and caret navigation. */
 static int starts[1402], lines, firstrow, caretrow;
 static int advance(char c) { return c >= 32 && c <= 126 ? fonts[0].adv[(int)c - 32] : 0; }
@@ -8,7 +11,7 @@ static void layout_note(void) {
     starts[0] = 0;
     for (int i = 0; i < n; i++) {
         int adv = advance(note[i]);
-        if (width + adv > 439) {
+        if (width + adv > paper_w() - 27) {
             starts[lines++] = i;
             width = 0;
         }
@@ -22,7 +25,8 @@ static void layout_note(void) {
     caretrow = 0;
     while (caretrow + 1 < lines && starts[caretrow + 1] <= editpos)
         caretrow++;
-    firstrow = clamp(caretrow - 9, 0, lines > 10 ? lines - 10 : 0);
+    firstrow = clamp(caretrow - paper_rows() + 1, 0,
+                     lines > paper_rows() ? lines - paper_rows() : 0);
 }
 static int line_end(int row) {
     int end = starts[row + 1];
@@ -42,7 +46,7 @@ static int pixel_pos(int row, int x) {
     return pos;
 }
 static void writer_place(int x, int y) {
-    if (x < 0 || x > 466 || y < 30 || y > 212)
+    if (x < 0 || x > paper_w() || y < 30 || y > paper_h() + 28)
         return;
     layout_note();
     int row = clamp(firstrow + (y - 34) / 17, 0, lines - 1);
@@ -50,15 +54,19 @@ static void writer_place(int x, int y) {
 }
 static void writer_draw(int x, int y) {
     layout_note();
-    int right = text(x, y, document, 1, INK);
+    char title[32];
+    copy(title, document, sizeof title);
+    while (tw(title, 1) > paper_w() - 165)
+        title[len(title) - 1] = 0;
+    int right = text(x, y, title, 1, INK);
     if (modified)
         text(right + 6, y, "*", 1, INK);
     char n[16];
     num(n, len(note));
-    text(text(x + 321, y + 4, n, 0, INK) + 5, y + 4, "/ 1399 bytes", 0, INK);
-    gel(x, y + 27, 466, 184, 9, 0xc5e2e2, 0xeaf3f0, WHITE);
-    box(x + 2, y + 29, 462, 179, 0xfcfffd);
-    for (int r = firstrow; r < lines && r < firstrow + 10; r++) {
+    text(text(x + paper_w() - 145, y + 4, n, 0, INK) + 5, y + 4, "/ 1399 bytes", 0, INK);
+    gel(x, y + 27, paper_w(), paper_h(), 9, 0xc5e2e2, 0xeaf3f0, WHITE);
+    box(x + 2, y + 29, paper_w() - 4, paper_h() - 5, 0xfcfffd);
+    for (int r = firstrow; r < lines && r < firstrow + paper_rows(); r++) {
         int tx = x + 11, yy = y + 34 + (r - firstrow) * 17;
         for (int p = starts[r]; p < line_end(r); p++) {
             if (editpos == p)
@@ -69,9 +77,9 @@ static void writer_draw(int x, int y) {
         if (caretrow == r && editpos == line_end(r))
             box(tx, yy + 1, 2, 14, 0x159684);
     }
-    text(x, y + 228, "Plain text  /  Ctrl+S saves", 0, INK);
-    pill(x + 226, y + 221, 114, 27, "Save", 1);
-    pill(x + 350, y + 221, 114, 27, "Save as...", 0);
+    text(x, y + paper_h() + 44, "Plain text  /  Ctrl+S saves", 0, INK);
+    pill(x + paper_w() - 240, y + paper_h() + 37, 114, 27, "Save", 1);
+    pill(x + paper_w() - 116, y + paper_h() + 37, 114, 27, "Save as...", 0);
 }
 static void writer_key(int k, char c) {
     int n = len(note);
@@ -124,10 +132,24 @@ static void writer_key(int k, char c) {
         modified = 1;
     }
 }
+static int drivex, drivey, driverow;
+static void drive_line(const char *s) {
+    if (driverow < 8)
+        text(drivex, drivey + driverow++ * 20, s, 0, INK);
+}
 static void files_draw(int x, int y) {
     text(x, y, "Workspace", 2, INK);
+    pill(x + 143, y, 84, 28, "Drives", filetab == 2);
     pill(x + 235, y, 106, 28, "Library", !filetab);
-    pill(x + 350, y, 115, 28, "Recent", filetab);
+    pill(x + 350, y, 115, 28, "Recent", filetab == 1);
+    if (filetab == 2) {
+        drivex = x + 5;
+        drivey = y + 50;
+        driverow = 0;
+        storage_list(drive_line);
+        pill(x, y + 211, 131, 30, "Disk setup", 0);
+        return;
+    }
     text(x, y + 34,
          filetab
              ? (home_ready() ? "FRESH HOME   /   RECENT FILES" : "SESSION   /   RECENT FILES")
@@ -150,9 +172,14 @@ static void files_draw(int x, int y) {
             GLYPH(SOUND, x + 6, yy + 4, 27, 20);
         } else
             icon(x + 6, yy + 2, app, 25);
-        text(x + 42, yy + 4, name, 1, INK);
+        char b[32];
+        copy(b, name, sizeof b);
+        while (tw(b, 1) > 294)
+            b[len(b) - 1] = 0;
+        text(x + 42, yy + 4, b, 1, INK);
         text(x + 345, yy + 7,
-             suffix(name, ".wav")   ? "PCM sound"
+             suffix(name, ".bmp")   ? "Photo / BMP"
+             : suffix(name, ".wav") ? "PCM sound"
              : suffix(name, ".elf") ? "Linux ELF"
              : suffix(name, ".exe") ? "Windows EXE"
              : suffix(name, ".imp") ? "IMP image"
@@ -164,6 +191,8 @@ static void files_draw(int x, int y) {
         text(x + 12, y + 84, "No recent files. Convert an EXE or save a document.", 1, INK);
     if (n) {
         pill(x, y + 211, 85, 30, "Open", 1);
+        if (suffix(selection(), ".imp"))
+            pill(x + 95, y + 211, 135, 30, "Install app", 0);
         if (suffix(selection(), ".exe"))
             pill(x + 95, y + 211, 135, 30, "Convert to IMP", 0);
         if (n > 4) {
@@ -173,10 +202,19 @@ static void files_draw(int x, int y) {
     }
 }
 static void file_click(int x, int y) {
+    if (inside(x, y, 143, 0, 84, 29)) {
+        filetab = 2;
+        return;
+    }
     if (y >= 0 && y < 29 && x >= 235 && x < 465) {
         filetab = x >= 350;
         file_refresh();
         fileidx = 0;
+        return;
+    }
+    if (filetab == 2) {
+        if (inside(x, y, 0, 211, 131, 30))
+            open_setup();
         return;
     }
     if (y >= 55 && y < 191 && x >= 0 && x < 466) {
@@ -196,6 +234,8 @@ static void file_click(int x, int y) {
     if (y >= 211 && y < 242 && filecount()) {
         if (x >= 0 && x < 85)
             open_file(selection());
+        else if (x >= 95 && x < 230 && suffix(selection(), ".imp"))
+            install_selection();
         else if (x >= 95 && x < 230 && suffix(selection(), ".exe"))
             convert_file(selection());
         else if (filecount() > 4 && x >= 295 && x < 465) {

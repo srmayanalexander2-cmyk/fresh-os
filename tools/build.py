@@ -36,9 +36,13 @@ def build(edition, wallpaper=None, compact=False):
                 struct.pack(
                     "<h",
                     round(
-                        7300
-                        * math.sin(2 * math.pi * (660 if i < 4800 else 880) * i / 24000)
-                        * min(1, i % 4800 / 240, (4800 - i % 4800) / 900)
+                        4400
+                        * (
+                            math.sin(2 * math.pi * 392 * i / 24000)
+                            + 0.28 * math.sin(2 * math.pi * 587.33 * i / 24000)
+                        )
+                        * min(1, i / 700)
+                        * ((9600 - i) / 9600) ** 2
                     ),
                 )
                 for i in range(9600)
@@ -244,11 +248,16 @@ firmware = "bios"
 memsize = "{32 if lite(edition) else 64}"
 ide0:0.present = "TRUE"
 ide0:0.fileName = "FreshTarget.vmdk"
+ide0:0.deviceType = "disk"
+ide0:0.startConnected = "TRUE"
 ide1:0.present = "TRUE"
 ide1:0.deviceType = "cdrom-image"
 ide1:0.fileName = "FreshOS-{edition}.iso"
 ide1:0.startConnected = "TRUE"
-bios.bootOrder = "cdrom"
+bios.bootOrder = "cdrom,hdd"
+serial0.present = "TRUE"
+serial0.fileType = "file"
+serial0.fileName = "FreshOS-serial.log"
 ethernet0.present = "TRUE"
 ethernet0.virtualDev = "vlance"
 ethernet0.connectionType = "nat"

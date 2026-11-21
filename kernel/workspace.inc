@@ -1,6 +1,6 @@
 /* File associations for the graphical workspace and command desktop. A live
  * session keeps its last linked IMP in memory even without a writable disk. */
-static char linked_name[32], document[32] = "note.txt", feedback[124];
+static char linked_name[32], document[32] = "note.txt", feedback[124], lastnotice[124];
 static u32 linked_size;
 static char recent[12][32];
 static int nrecent, filetab, fileidx, editpos, savebox, ctrl;
@@ -18,6 +18,7 @@ static int suffix(const char *s, const char *ext) {
 static u32 feedback_until;
 static void log_event(const char *);
 static void notify(const char *s) {
+    copy(lastnotice, s, sizeof lastnotice);
     log_event(s);
     copy(feedback, s, sizeof feedback);
     say(s);
@@ -40,7 +41,7 @@ static void file_refresh(void) {
     last_file = -1;
 }
 static int filecount(void) {
-    return filetab ? nrecent : (int)(sizeof library / sizeof *library);
+    return filetab == 2 ? 0 : filetab ? nrecent : (int)(sizeof library / sizeof *library);
 }
 static const char *selection(void) {
     return fileidx >= 0 && fileidx < filecount()
@@ -86,9 +87,17 @@ static int get_program(const char *name, const u8 **data) {
     }
     return -2;
 }
+static int load_photo(const char *);
 static void open_file(const char *name) {
     if (!*name)
         return;
+    if (suffix(name, ".bmp")) {
+        if (load_photo(name))
+            launch(PHOTOS);
+        else
+            notify("Photos: invalid, too large or unsupported BMP encoding.");
+        return;
+    }
     if (eq(name, "canvas")) {
         launch(PAINT);
         return;
@@ -175,8 +184,8 @@ static void convert_file(const char *name) {
     serial("\r\n");
 }
 static void write_document(const char *name) {
-    if (!*name || eq(name, "canvas") || eq(name, "profile") || suffix(name, ".exe") ||
-        suffix(name, ".imp")) {
+    if (!*name || eq(name, "canvas") || eq(name, "packages.db") || eq(name, "profile") ||
+        suffix(name, ".exe") || suffix(name, ".imp")) {
         notify("Choose a document name, for example journal.txt.");
         return;
     }

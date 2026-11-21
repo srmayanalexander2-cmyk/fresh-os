@@ -1,10 +1,22 @@
-# FreshOS 1.3 verification · 2026-11-20
+# FreshOS 1.4 verification
+
+| Final-media check | Result and boundary |
+|---|---|
+| Four editions, two firmware paths | `tools/check.py` and eight QEMU BIOS / UEFI smoke boots passed, including CLI, tray restore, EXE→IMP and ELF execution. VMware Lite also installed to a marked IDE disk, saved data and booted disk-only under both firmware paths. |
+| CLI, pointer and windows | `tests/usability.py` exited via command, Escape and a mouse click. It maximized/restored Writer and compared the Home file after a right-click copy and paste. `tests/vmguest.py` exercised the VMware absolute-pointer protocol in QEMU. Not a VMware Workstation hardware certification. |
+| Disk discovery | A guest identified the pre-existing foreign disk at IDE 0:0, Home at 0:1, and the optical device separately. The foreign disk bytes remained unchanged. `tests/vmstorage.py` installed from an IDE 0:1 CD to a disposable copy of the supplied VMDK at 1:1 and booted the result without optical media. |
+| Packages, photos and diagnostics | A guest installed an IMP, launched it from Software, rebooted, ran the installed bytes again, and removed the package via the confirmation button. The latest Home catalog was empty afterward. Photos displayed expected decoded BMP pixels. Injecting an NMI into running 32-bit BIOS and 64-bit EFI guests produced vector 2, name, IP and CPU code on the serial log; the BIOS screenshot shows the stop screen. Not a claim that a crashed shell can still use a clipboard. |
+| Regressions | `tests/test_compat.py` (five groups), `tests/filetools.py`, `tests/desktop.py`, `tests/utilities.py`, BIOS virtio and UEFI SATA `tests/devices.py` passed. The Normal optical payload booted in v86/Chromium. The browser here is the **host emulator UI**, not an in-guest web browser. |
+
+Guest framebuffer captures: [Drives](screens/drives.jpg) · [smiley volume slider](screens/smile-slider.jpg) · [BMP viewer](screens/photos.jpg) · [CPU stop report](screens/panic.jpg). See [the update guide](usability.md) for limits and outstanding requests.
+
+## FreshOS 1.3 verification · 2026-11-20
 
 * **Native media:** All four editions passed `tools/check.py` and booted in QEMU under legacy BIOS and x64 UEFI. VMware Lite passed `--install` under both, including disk-only reboot and persisted document checks. The Normal optical payload also booted in the v86 browser preview.
 * **New utility checks:** `QEMU_BIN=… python tests/utilities.py out/FreshOS-VMware-Lite.iso` drives the guest with keyboard and pointer input and reads the resulting Home disk independently. The test switched desktops with a note open, pasted into a checklist on the other desktop, returned to the note, clicked an on-screen key and rebooted to verify both documents could be edited again. It checked a magnifier region against the source pixels, reordered a quick action and invoked it, opened Writer from Tips, received a countdown alert, decoded a 26×32 BMP, opened a two-member tar and decompressed a gzip file. [Task View](screens/task-view.jpg) · [Actions](screens/actions.jpg) · [Magnifier](screens/magnifier.jpg)
 * **Algorithm checks:** `python tests/filetools.py` compiled the guest's actual file-tool code on the host and compared its results with `hashlib`, `tarfile` and `gzip`, including empty files and SHA3 rate, tar-sector and DEFLATE block boundaries.
 * **Regression checks:** Five host compatibility groups, the mouse-driven desktop and VMware pointer tests, and the BIOS virtio / UEFI SATA device fixtures passed. These are emulator/protocol tests, not physical Wi-Fi, Bluetooth, VMware Workstation or Windows compatibility certification.
-* **Downloads:** Four ZIP64 archives with expanded-ISO SHA-256 files are in `releases/`. The workspace packages are 1.3; the historical results below are for 1.2 only.
+* **Downloads:** The four ZIP64 archives and expanded-ISO hashes for this section are at tag `v1.3.0`.
 
 ## FreshOS 1.2 verification · 2026-11-20
 

@@ -51,7 +51,7 @@ def exercise(iso, shots):
             m.wait("desktop ready", timeout=4)
             p.click(22, 239)
             capture("volume")
-            p.click(278, 251)
+            p.click(837, 631)
             p.click(620, 150)
             p.click(22, 206)
             m.wait("app: connections")

@@ -15,5 +15,6 @@ void guest_services(int (*read)(const char *, void *, u32), void (*box)(const ch
 int elf_run(const u8 *, u32, PeResult *);
 int pe_run(const u8 *file, u32 size, PeResult *result);
 u32 imp_convert(const u8 *, u32, u8 *, u32, PeResult *);
+const char *imp_check(const u8 *, u32);
 int imp_run(const u8 *, u32, PeResult *);
 #endif

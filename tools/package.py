@@ -27,6 +27,7 @@ def pack(edition):
         z.writestr("SHA256SUMS.txt", check)
         z.write(ROOT / "README.md", "README.txt")
         z.write(ROOT / "docs/coverage.md", "FEATURES.txt")
+        z.write(ROOT / "docs/usability.md", "DESKTOP-AND-STORAGE.txt")
         z.write(ROOT / "docs/licenses/DejaVu.txt", "FONT-LICENSE.txt")
         z.write(ROOT / "docs/imp.md", "IMP-FORMAT.txt")
         z.write(ROOT / "docs/drivers.md", "HARDWARE-AND-APPS.txt")

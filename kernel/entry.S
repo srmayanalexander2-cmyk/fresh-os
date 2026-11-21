@@ -32,3 +32,5 @@ eoi: out %al,$0x20
  pop %eax
  iret
 .section .note.GNU-stack,"",@progbits
+
+#include "faults.inc.S"

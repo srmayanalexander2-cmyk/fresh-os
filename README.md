@@ -1,4 +1,4 @@
-# FreshOS 1.3 · Native sky desktop
+# FreshOS 1.4 · Native sky desktop
 
 A native, experimental x86 desktop built for the supplied cloud-and-glass design. The loaders, kernel, framebuffer renderer, input drivers, shell, app sessions, installer, Fresh Home filesystem and IMP linker and bounded x86 interpreter are written here. **It is not a Linux image, a browser kiosk, or a Windows distribution.** The OS does not require the internet to start.
 
@@ -15,7 +15,9 @@ Extract **one** ZIP64 archive. Each contains a bootable `.iso`, exactly **8,000,
 
 **What occupies the space:** the native BIOS payload is under 4 MB; the hybrid image also carries an 8 MiB FAT16 EFI system partition. At byte 16,777,216 begins the writable **Fresh Home** partition. Its initially empty space is why the downloads compress well. This is 8 GB of *disk capacity*, not 8 GB of implemented software. An optical drive is read-only; user data needs a writable, supported disk. The compact developer build omits Home and cannot be installed with the native installer.
 
-**New in 1.3:** four virtual desktops, six native utility sessions, screen capture, clipboard, on-screen keyboard, alarms, SHA3-256 and TAR/gzip creation. See [controls and limits](#3--use-the-desktop) and the [full Windows request checklist](docs/coverage.md).
+**New in 1.4:** `exit`, Esc, and the Desktop button leave the command desktop. Files → Drives distinguishes detected hardware, protected foreign disks, a prepared installer target, and mounted Home. Open Settings → More settings for auto-hide, fill vs aspect-preserving scaling, and soft/silent feedback. [Details, limits and remaining requests](docs/usability.md).
+
+**In 1.3:** four virtual desktops, six native utility sessions, screen capture, clipboard, on-screen keyboard, alarms, SHA3-256 and TAR/gzip creation. See [controls and limits](#3--use-the-desktop) and the [full Windows request checklist](docs/coverage.md).
 
 **Hardware in 1.2:** [Hardware matrix, radio wiring, commands, Windows and Linux app guides](docs/drivers.md). Probe real hardware with **Setup → Drivers**. The recommended VMware profile includes native guest integration and an emulated PCnet NIC, not proprietary VMware Tools.
 
@@ -24,7 +26,7 @@ Extract **one** ZIP64 archive. Each contains a bootable `.iso`, exactly **8,000,
 * **Try first:** attach the ISO as a CD/DVD and boot it. Press **Enter** or click **Start session**. No installation, network, or account is required.
 * **PC boot paths:** legacy BIOS loads a 32-bit protected-mode kernel via VBE. x64 UEFI loads the native 64-bit kernel from `EFI/BOOT/BOOTX64.EFI`, gets the GOP framebuffer, and exits firmware boot services. Unsigned; Secure Boot is not supported. BIOS uses a 32-bit RGB linear framebuffer; UEFI needs RGB/BGR GOP. Input uses i8042/PS/2 or compatible legacy emulation. USB-only input, ARM, native NVMe and arbitrary GPUs are not supported. Prefer a VM to test. Physical PCs and VMware Workstation have not been hardware-certified or tested here.
 * **Removable media:** the ISO is also a raw disk image with an MBR and EFI system partition. Use an image writer in **raw/DD mode** on a **spare USB drive of sufficient capacity**. This overwrites the USB's contents. Do not target your system disk. Boot success depends on the hardware conditions above. No USB mass-storage driver after boot; a USB-booted session normally stays in RAM.
-* **Persistent installation:** use the prepared VMware disk, or create a **new** raw disk with `python3 tools/new-target.py fresh-target.img`. Attach it as primary IDE master, a supported virtio-blk disk or AHCI SATA disk, and the ISO as secondary IDE master. On the welcome screen press **I**, read the destination status, then press **I** again to install. Esc backs out. The installer only accepts an expressly marked target, verifies copied sectors, initializes Fresh Home, and publishes the MBR last. You can use apps during the copy. On success, shut down the VM, disconnect its CD and boot the disk. Keep the installed VM outside the build output folder.
+* **Persistent installation:** use the prepared VMware disk, or create a **new** raw disk with `python3 tools/new-target.py fresh-target.img`. Attach it as an IDE disk, supported virtio-blk disk or AHCI SATA disk, and the ISO as an IDE optical drive. The included VMX already does this. On the welcome screen press **I**, read the destination status, then press **I** again to install. Esc backs out. The installer only accepts an expressly marked target, verifies copied sectors, initializes Fresh Home, and publishes the MBR last. You can use apps during the copy. On success, shut down the VM, disconnect its CD and boot the disk. Keep the installed VM outside the build output folder.
 * **Not a Windows migration tool:** the installer refuses ordinary disks. There is no automatic NTFS import, repartition of an existing PC, or Windows deletion path.
 
 QEMU example (regular Linux host, no KVM required):
@@ -52,9 +54,9 @@ Click the rail icons for Files, Writer, Settings, Clock, tray, Connections, volu
 | F4 / Esc / window `_` | Minimize without losing state. `x` closes the session. Drag the title bar to move a window. |
 | F6 / F7 | Sound-feedback level / screen dimmer; Left/Right adjusts, Esc dismisses |
 
-**Command-line desktop:** no desktop cursor; the cursor returns inside graphical apps. `start` lists runnable apps as text and leaves the prompt active. Type an app name, or `open NAME`. Prefixes show matching apps; Tab completes a name, Up recalls the last command. Try `start`, `writer`, F4, `tasks`, `resume writer`, `wall lagoon`, `color ice`, `time`, `gui` or `help`.
+**Command-line desktop:** the pointer remains available. Click **Desktop / Esc**, press Esc at the prompt, or type `exit` to return. `start` lists runnable apps as text and leaves the prompt active. Type an app name, or `open NAME`. Prefixes show matching apps; Tab completes a name, Up recalls the last command. Try `start`, `writer`, F4, `tasks`, `resume writer`, `wall lagoon`, `color ice`, `time`, `gui` or `help`.
 
-**Apps:** Files (select/open, Library/Recent, EXE conversion), Writer (plain-text editor), Paint, Calculator (integer arithmetic), hardware Clock, Settings, Terminal, playable Minefield, System information, month Calendar, Tasks, Programs (IMP/EXE output), Connections, Stickies, To Do, Glyphs, Tips, Events and Actions. These are built-in sessions in one address space, not isolated preemptive user processes.
+**Apps:** Files (select/open, Library/Recent, EXE conversion), Writer (plain-text editor), Paint, Calculator (integer arithmetic), hardware Clock, Settings, Terminal, playable Minefield, System information, month Calendar, Tasks, Programs (IMP/EXE output), Connections, Stickies, To Do, Glyphs, Tips, Events, Actions, Photos (local BMP) and Software (local IMP packages). These are built-in sessions in one address space, not isolated preemptive user processes.
 
 **Try the utilities:** In Stickies, type a note, press Ctrl+C, then Ctrl+S. In To Do, paste with Ctrl+V and press Enter to add it; Tab checks the selected item and Ctrl+S saves the list. Three cards and twelve checklist items fit. Glyphs copies printable ASCII. Writer copies its whole document; Terminal uses Ctrl+Shift+C for its input line. Clipboard and the last 32 shell events are session-only.
 

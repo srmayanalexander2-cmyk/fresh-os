@@ -57,7 +57,7 @@ def bake(build, lite, wallpaper=None):
         with Image.open(glyph) as art:
             asset("GL_" + glyph.stem.upper(), art)
     icons = atlas()
-    for i in range(18):
+    for i in range(20):
         asset(f"ICON{i}", icons.crop((i * 64, 0, (i + 1) * 64, 64)))
     for label, sz, bold in [
         ("small", 11, False),

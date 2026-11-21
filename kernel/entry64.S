@@ -47,3 +47,5 @@ gdt64: .quad 0,0x00af9b000000ffff,0x00cf93000000ffff
 .balign 16
 .skip 65536
 stack_end:
+
+#include "faults.inc.S"

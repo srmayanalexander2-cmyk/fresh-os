@@ -34,8 +34,7 @@ def verify(iso):
             time.sleep(0.25)
             with Image.open(screen) as im:
                 sw, sh = im.size
-            dw = min(sw, sh * 16 // 9)
-            dh = dw * 9 // 16
+            dw, dh = sw, sh  # Fill is the default; map the entire firmware framebuffer.
             with socket.socket(socket.AF_UNIX) as s:
                 s.connect(str(qmp))
                 stream = s.makefile("rb")
