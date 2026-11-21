@@ -1,4 +1,1 @@
-# Preserve the third-party license verbatim.
 docs/licenses/DejaVu.txt -whitespace
-third_party/** -whitespace
-tools/aero-engine/MUSL-LICENSE -whitespace

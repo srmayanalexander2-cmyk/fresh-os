@@ -1,9 +1,4 @@
 /build/
 /out/
-.preview/
 __pycache__/
 *.pyc
-
-# Ignore future local packages; only explicitly published archives are tracked.
-/releases/*.zip
-/releases/*.tmp

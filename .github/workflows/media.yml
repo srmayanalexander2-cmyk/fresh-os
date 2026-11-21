@@ -1,14 +1,11 @@
-name: Build FreshOS media
-on:
-  workflow_dispatch:
-  pull_request:
-    paths: ['boot/**', 'kernel/**', 'tools/**', 'examples/**', 'tests/**', 'third_party/**', 'assets/**', 'requirements.txt', '.github/workflows/media.yml']
+name: Stratus native media
+on: [workflow_dispatch, pull_request]
 permissions:
   contents: read
 jobs:
-  native-media:
+  verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 18
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -18,42 +15,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install build and test tools (not guest payload)
-        run: |
+      - run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends binutils build-essential fonts-dejavu-core qemu-system-x86 ovmf
-          python -m pip install -r requirements.txt
-      - run: cc -O2 tests/filecmd.c -o /tmp/filecmd && /tmp/filecmd
-      - run: python tests/aerojs.py
-      - run: python tests/filetools.py
-      - run: python tests/test_compat.py -v
-      - run: python tools/build.py ${{ matrix.edition }}
-      - run: python tools/check.py out/FreshOS-${{ matrix.edition }}.iso
-      - run: python tools/smoke.py out/FreshOS-${{ matrix.edition }}.iso
-      - run: python tests/browser.py out/FreshOS-${{ matrix.edition }}.iso
-      - run: python tests/browser.py out/FreshOS-${{ matrix.edition }}.iso --uefi --nic e1000 --errors
-      - name: Exercise graphical file conversion and Writer with mouse input
-        if: matrix.edition == 'VMware-Lite'
+          sudo apt-get install -y --no-install-recommends build-essential binutils fonts-dejavu-core ovmf qemu-system-x86
+          pip install -r requirements.txt
+      - run: cc -O2 -Inative/core native/core/{math,calendar}.c qa/core.c -o /tmp/check && /tmp/check
+      - run: python forge/media.py ${{ matrix.edition }}
+      - run: python qa/boot.py ${{ matrix.edition }}
+      - run: python qa/boot.py ${{ matrix.edition }} --efi
+      - run: python qa/layout.py ${{ matrix.edition }}
+      - if: matrix.edition == 'VMware-Lite'
         run: |
-          python tests/desktop.py out/FreshOS-VMware-Lite.iso
-          python tests/utilities.py out/FreshOS-VMware-Lite.iso
-          python tests/browser_home.py out/FreshOS-VMware-Lite.iso
-          python tests/browser_dns.py out/FreshOS-VMware-Lite.iso
-          python tests/usability.py out/FreshOS-VMware-Lite.iso
-          python tests/vmstorage.py out/FreshOS-VMware-Lite.iso build/VMware-Lite/vm/FreshTarget.vmdk
-      - name: Exercise PCI devices, guest file consent, ELF and UART protocols
-        if: matrix.edition == 'VMware-Lite'
-        run: |
-          python tests/vmguest.py out/FreshOS-VMware-Lite.iso
-          python tests/devices.py out/FreshOS-VMware-Lite.iso
-          python tests/devices.py out/FreshOS-VMware-Lite.iso --uefi --sata
-      - name: UEFI boot and interaction
-        run: python tools/smoke.py out/FreshOS-${{ matrix.edition }}.iso --uefi ${{ (matrix.edition == 'Normal' || matrix.edition == 'VMware-Lite') && '--install' || '' }}
-      - run: python tools/package.py ${{ matrix.edition }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: FreshOS-${{ matrix.edition }}-media
-          path: |
-            releases/FreshOS-${{ matrix.edition }}.zip
-            releases/FreshOS-${{ matrix.edition }}.sha256
-          compression-level: 0
+          python qa/install.py VMware-Lite
+          python qa/install.py VMware-Lite --efi
+          python qa/vmprofile.py
+      - if: matrix.edition == 'Lite'
+        run: python qa/recovery.py
