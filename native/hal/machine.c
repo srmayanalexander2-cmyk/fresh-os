@@ -100,6 +100,20 @@ void tone(int amount) {
     out8(0x61, in8(0x61) | 3);
     silence_at = ticks + 2;
 }
+/* Media playback: hold the note until the engine calls again (no auto-off). */
+void tone_freq(int hz, int vol) {
+    if (hz <= 0 || vol <= 0) {
+        out8(0x61, in8(0x61) & ~3);
+        silence_at = 0;
+        return;
+    }
+    u16 div = 1193182 / hz;
+    out8(0x43, 0xb6);
+    out8(0x42, div);
+    out8(0x42, div >> 8);
+    out8(0x61, in8(0x61) | 3);
+    silence_at = 0;
+}
 static int wait_in(void) {
     for (int t = 0; t < 80000; t++)
         if (!(in8(0x64) & 2))

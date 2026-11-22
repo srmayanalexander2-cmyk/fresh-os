@@ -19,7 +19,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends build-essential binutils fonts-dejavu-core ovmf qemu-system-x86
           pip install -r requirements.txt
-      - run: cc -O2 -Inative/core native/core/{math,calendar}.c qa/core.c -o /tmp/check && /tmp/check
+      - run: cc -O2 -Inative/core native/core/math.c native/core/calendar.c native/core/mediafmt.c native/core/base.c qa/core.c -o /tmp/check && /tmp/check
       - run: python forge/media.py ${{ matrix.edition }}
       - run: python qa/boot.py ${{ matrix.edition }}
       - run: python qa/boot.py ${{ matrix.edition }} --efi

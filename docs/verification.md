@@ -1,5 +1,14 @@
 # Stratus verification
 
+## Preview 3: context menus, media, photos and file tools
+
+Guest captures: [context menu](screens/p3/context-menu.jpg) · [Media](screens/p3/media.jpg) · [Photos](screens/p3/photos.jpg) · [Snake](screens/p3/snake.jpg) · [Files](screens/p3/files.jpg) · [Writer](screens/p3/writer.jpg).
+
+* `qa/media.py` boots Lite, right-clicks the desktop (PS/2 right button) and clicks the Terminal menu item, creates `song.mus` and `pic.pbm` in Writer, exercises select-all/cut/undo/find, runs `wc`/`cp`/`mv`/`find`/`rm` in Terminal, smart-opens music into Media and the picture into Photos, starts Snake and steers it, right-clicks a Files row, and copies a Calculator result with Ctrl+C. All steps are checked against the guest serial log.
+* `qa/core.c` (host) checks the music and Netpbm parsers: note names, rests, sharps, ranges, malformed input, P1/P2/P3 decoding, comments and size limits, plus all four built-in tunes.
+* `qa/layout.py` now opens twelve apps (the nine previous plus Media, Photos and Snake) fullscreen and checks each layout against the framebuffer size.
+* All Preview 2 checks below still pass on the Preview 3 kernels (four editions × BIOS/EFI boot, packages, native processes, installer, recovery, VMware profile).
+
 ## Native x64 development build
 
 See [native processes: execution model and interoperability checks](native-processes.md). `qa/processes.py` boots OVMF, installs a third-party Windows EXE, exercises Windows and Linux memory lifecycles, verifies fault handling and watchdog expiry, and launches another package afterward. An optional BusyBox comparison uses the same static ELF on Linux and FreshOS. The browser live preview uses **BIOS**, not this CPU backend. Guest captures: [Windows calendar](screens/native/win64-cal.jpg) · [Linux BusyBox](screens/native/linux-busybox.jpg).
@@ -11,7 +20,7 @@ These are captures from the running native guest: [Welcome](screens/imp2/welcome
 * `qa/imp_tool.py` extracts the **shipped packer** and checks linking with/without the local DLL, rejection of a Linux interpreter dependency, and no changes to a foreign disk or a duplicate install.
 * `qa/packages.py` uses two guest boots per firmware. It refuses to launch an inbox package, installs it, executes real x86/x64 PE and static ELF programs, acknowledges the Windows dialogs, reads a newly supplied resource not on the ISO, rejects a corrupted package and reruns the installed DLL example after reboot.
 * `qa/vmprofile.py` clicks Use OS, opens the library via the rail, installs and runs the DLL example, dismisses its dialog with the mouse and opens Files from the radial menu. It also checks settings persistence and installation of the OS.
-* `qa/layout.py` now exercises nine native sessions including IMP Library. The v86 preview mounts a temporary Home image; the installed DLL sample was also installed, opened and acknowledged in the browser-hosted VM. Reloading that page starts a new session. The browser hosting v86 is **not** Chrome running inside Stratus.
+* `qa/layout.py` exercises twelve native sessions including IMP Library, Media, Photos and Snake. The v86 preview mounts a temporary Home image; the installed DLL sample was also installed, opened and acknowledged in the browser-hosted VM. Reloading that page starts a new session. The browser hosting v86 is **not** Chrome running inside Stratus.
 
 See [IMP2](imp.md) for exact limits.
 
@@ -26,7 +35,7 @@ The checks below used the compiled kernels, not the old desktop or a host-side r
 | Installer | `qa/install.py VMware-Lite` on BIOS and UEFI checked that the blank destination was still marked before confirmation, then installed from the CD. The test compared the entire installed system region with the ISO bytes, removed the CD, booted from the IDE disk and saved a new document. |
 | Recovery and foreign disks | `qa/recovery.py` damaged the data of the newest of two committed snapshots in a test disk. The next boot recovered the older document; editing it and saving committed a valid replacement. A second disk containing foreign bytes remained byte-for-byte unchanged after attempts to install and save. |
 | VMware profile | `qa/vmprofile.py` extracted the published ZIP layout and used the VMDK descriptor **and** its flat extent. A QEMU VMware VGA/vmport guest negotiated absolute input and clicked Open Files. It changed both sliders, wallpaper, accent, auto-hide and new-window behavior, then saved preferences; the host checked the fields written to disk. The installed VMDK booted on its own. This is a protocol/emulation test, not VMware Workstation or Fusion certification. |
-| Host unit tests | `qa/core.c` checks calculator precedence, parentheses, integer overflow, division by zero, incomplete input, Gregorian leap-year rules and month alignment. |
+| Host unit tests | `qa/core.c` checks calculator precedence, parentheses, integer overflow, division by zero, incomplete input, Gregorian leap-year rules, month alignment, and the music/Netpbm parsers. |
 | Live preview | v86 running in headless Chromium booted the Normal ISO to the native workspace. This uses a **host** browser to emulate a PC. It does not put a web browser in the guest. |
 
 **Actual guest framebuffer captures:** [workspace](screens/workspace.jpg) · [Files](screens/files-fullscreen.jpg) · [Writer](screens/writer-fullscreen.jpg) · [Calculator](screens/calc-fullscreen.jpg) · [Settings](screens/settings-fullscreen.jpg) · [System](screens/system-fullscreen.jpg) · [Clock](screens/clock-fullscreen.jpg).
@@ -39,10 +48,11 @@ Build with `python forge/media.py all`. Install `qemu-system-x86_64` and OVMF or
 python qa/boot.py Normal
 python qa/boot.py Normal --efi
 python qa/layout.py Lite
+python qa/media.py Lite
 python qa/install.py VMware-Lite --efi
 python qa/recovery.py
 python qa/vmprofile.py
-cc -O2 -Inative/core native/core/{math,calendar}.c qa/core.c -o /tmp/stratus-check && /tmp/stratus-check
+cc -O2 -Inative/core native/core/math.c native/core/calendar.c native/core/mediafmt.c native/core/base.c qa/core.c -o /tmp/stratus-check && /tmp/stratus-check
 ```
 
 For the optional emulator page, supply a local v86 npm package and the corresponding v86 firmware directory to `python preview/prepare.py PATH_TO_V86_PACKAGE PATH_TO_BIOS`. Serve `build/preview` as a static site. The guest boots without a persistent disk in this harness.

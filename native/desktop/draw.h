@@ -1,11 +1,14 @@
 #pragma once
 #include "base.h"
 extern int sw, sh;
+extern int gfx_fast;
+extern int text_sel_lo, text_sel_hi;
 int canvas(struct Display *);
 void present(int);
 void clip(Rect);
 void clear_clip(void);
 void fill(Rect, u32);
+void rect_direct(Rect, u32);
 void rounded(Rect, int, u32);
 void glass(Rect, int, u32, int);
 void wallpaper(Rect, int);

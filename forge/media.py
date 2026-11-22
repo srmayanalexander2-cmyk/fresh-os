@@ -54,6 +54,9 @@ def assets(d, lite):
             "#d58374",
             "#7e9fcc",
             "#efb04b",
+            "#c96a9e",
+            "#5aa469",
+            "#e07a4f",
         ]
     ):
         im = Image.new("RGBA", (64, 64))
@@ -100,6 +103,18 @@ def assets(d, lite):
         if i == 7:
             p.ellipse((10, 10, 54, 54), fill="#f7fbff", outline=ink, width=2)
             p.line([(32, 17), (32, 32), (42, 38)], fill=ink, width=4)
+        if i == 9:
+            p.ellipse((14, 38, 26, 50), fill="white", outline=ink, width=2)
+            p.line((26, 44, 26, 14), fill="white", width=4)
+            p.polygon([(26, 14), (46, 20), (46, 30), (26, 24)], fill="white")
+        if i == 10:
+            p.rectangle((12, 12, 52, 52), fill="#def8ff", outline=ink, width=2)
+            p.ellipse((38, 16, 48, 26), fill="#ffd94d", outline=ink, width=1)
+            p.polygon([(12, 52), (26, 30), (36, 42), (44, 32), (52, 52)], fill="#398468")
+        if i == 11:
+            p.line([(12, 44), (24, 44), (24, 24), (40, 24), (40, 44), (52, 44)], fill="white", width=6)
+            p.ellipse((46, 38, 54, 46), fill="white", outline=ink, width=2)
+            p.ellipse((18, 18, 26, 26), fill="#ffd94d", outline=ink, width=2)
         if i == 8:
             im = Image.open(ROOT / "assets/glyphs/smile.png").convert("RGBA")
             im.putdata(
@@ -416,6 +431,7 @@ def package(e):
             z.write(f, f.name)
         for name in (
             "docs/imp.md",
+            "docs/media.md",
             "forge/imp.py",
             "forge/appdisk.py",
             "native/vendor/fatfs/README.md",

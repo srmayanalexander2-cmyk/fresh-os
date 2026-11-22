@@ -20,3 +20,4 @@ int key_event(void);
 int pointer_event(int *, int *, int *);
 void idle(void);
 void tone(int);
+void tone_freq(int hz, int vol);

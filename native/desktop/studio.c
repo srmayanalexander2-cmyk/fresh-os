@@ -5,7 +5,22 @@
 #include "pci.h"
 #include "calendar.h"
 #include "package.h"
-enum { FILES, WRITER, CALC, TERM, SETTINGS, DEVICE, SKETCH, CLOCK, PACKAGES, APPS };
+#include "mediafmt.h"
+enum {
+    FILES,
+    WRITER,
+    CALC,
+    TERM,
+    SETTINGS,
+    DEVICE,
+    SKETCH,
+    CLOCK,
+    PACKAGES,
+    MEDIA,
+    PHOTOS,
+    SNAKE,
+    APPS
+};
 struct App {
     const char *name, *hint, *cmd;
     u32 tint;
@@ -19,7 +34,10 @@ static const struct App app[APPS] = {
     {"System", "Inspect the running kernel", "system", 0xc3a3d9},
     {"Sketch", "Draw on a scalable canvas", "sketch", 0xeaa096},
     {"Clock", "Local time and countdown", "clock", 0x9dbbe4},
-    {"IMP", "Installed packages", "imp", 0x11cdff}};
+    {"IMP", "Installed packages", "imp", 0x11cdff},
+    {"Media", "Music on the PC speaker", "media", 0xc96a9e},
+    {"Photos", "View Netpbm pictures", "photos", 0x5aa469},
+    {"Snake", "A classic arcade game", "snake", 0xe07a4f}};
 static const u32 accents[] = {0x117b78, 0x3866a0, 0x895b95};
 static const char *const inks[] = {"Ocean", "Coral", "Leaf", "Erase"};
 static const u32 colors[] = {0x246298, 0xce746b, 0x398468, WHITE};
@@ -44,14 +62,61 @@ static u32 expiry;
 static int sel, editing = -1, caret, scroll, changed;
 static char draft[NOTE_CAP], clipboard[NOTE_CAP];
 static char expr[100], answer[80] = "0";
-static char command[160], previous[160], lines[56][168];
+static char command[160], lines[56][168];
+static char history[8][160];
+static int hist_n, hist_pos;
 static int nlines, termoff;
 static u8 pixels[180][320];
-static int brush, px = -1, py = -1;
+static int brush, brush_size, px = -1, py = -1;
 static u32 alarm;
 static int timer_minutes = 5;
 static char timetext[12];
 static int clocklast = -1;
+/* Writer: selection, undo, find. */
+static int sel_anchor = -1;
+static char undo_buf[16][NOTE_CAP];
+static int undo_next, undo_count;
+static char find_buf[64];
+static int find_mode;
+/* Files: sort, filter, rename, pending delete. */
+static int files_sort, pending_delete = -1;
+static char files_filter[32];
+static int files_search_mode;
+static char rename_buf[28];
+static int rename_mode, rename_id = -1;
+static int file_list[16], file_list_n;
+/* Calculator memory. */
+static int calc_mem;
+/* Clock stopwatch. */
+static int clock_mode;
+static u32 sw_start, sw_elapsed;
+static int sw_running;
+/* Media player (PC speaker). */
+static int media_freqs[MEDIA_MAX_NOTES], media_durs[MEDIA_MAX_NOTES], media_nnotes;
+static char media_name[32];
+static int media_kind, media_idx = -1, media_note, media_playing, media_paused;
+static u32 media_end, media_remain;
+static int media_vol = 70, media_loop = 1;
+static Rect media_thumb;
+/* Photos. */
+static u8 photo_buf[PHOTO_MAX_W * PHOTO_MAX_H * 3];
+static int photo_w, photo_h, photo_kind, photo_idx = -1, photo_zoom;
+static char photo_name[32];
+/* Snake. */
+static int snake_x[256], snake_y[256], snake_len, snake_dir = 3, snake_fx, snake_fy;
+static int snake_score, snake_high, snake_running, snake_paused, snake_dead;
+static u32 snake_next;
+static int snake_seed = 12345;
+/* Right-click context menu. */
+static int autoroll;
+static int ctx_kind, ctx_x, ctx_y, ctx_arg;
+static Rect ctx_rect;
+struct CtxItem {
+    const char *label;
+    int action, arg;
+};
+static struct CtxItem ctx_items[10];
+static int ctx_count;
 enum {
     OPEN = 1,
     START,
@@ -85,7 +150,45 @@ enum {
     RUNPKG,
     WELCOME,
     USE_OS,
-    DISMISS
+    DISMISS,
+    TERM_CLEAR,
+    TERM_HELP,
+    WRITER_UNDO,
+    WRITER_CUT,
+    WRITER_COPY,
+    WRITER_PASTE,
+    WRITER_SELECTALL,
+    WRITER_FIND,
+    WRITER_COUNT,
+    FILES_RENAME,
+    FILES_DUP,
+    FILES_DEL,
+    FILES_PROPS,
+    FILES_SORT,
+    FILES_SEARCH,
+    SKETCH_SAVE,
+    SKETCH_SIZE,
+    MEDIA_PLAY,
+    MEDIA_NEXT,
+    MEDIA_PREV,
+    MEDIA_STOP,
+    MEDIA_VOL,
+    PHOTOS_NEXT,
+    PHOTOS_PREV,
+    PHOTOS_ZOOM,
+    SNAKE_NEW,
+    SNAKE_PAUSE,
+    SNAKE_DIR,
+    CALC_COPY,
+    CALC_MEM,
+    WALL_CYCLE,
+    ABOUT,
+    SW_TOGGLE,
+    SW_START,
+    SW_RESET,
+    GFX_TOGGLE,
+    SOUND_TEST,
+    CLOCK_MODE
 };
 struct Target {
     Rect r;
@@ -117,6 +220,9 @@ static void note_load(int i) {
     strset(draft, sizeof draft, home.notes[i].body);
     caret = length(draft);
     scroll = changed = 0;
+    sel_anchor = -1;
+    undo_count = 0;
+    find_mode = 0;
 }
 static void launch(int id) {
     confirm_install = 0;
@@ -183,6 +289,519 @@ static void print(const char *s) {
     }
     strset(lines[nlines++], sizeof *lines, s);
     termoff = 0;
+}
+/* ---- File kinds, media, photos, snake, writer and files helpers ---- */
+static const char *ext_of(const char *name) {
+    const char *dot = 0;
+    for (const char *p = name; *p; p++)
+        if (*p == '.')
+            dot = p;
+    return dot ? dot + 1 : 0;
+}
+static int file_kind(int id) {
+    if (id < 0 || (unsigned)id >= home.count)
+        return 0;
+    const char *e = ext_of(home.notes[id].name);
+    if (e && equal(e, "mus"))
+        return 1;
+    if (e && (equal(e, "pbm") || equal(e, "pgm") || equal(e, "ppm")))
+        return 2;
+    return 0;
+}
+static void media_load_builtin(int i) {
+    if (i < 0 || i >= builtin_track_count)
+        return;
+    int n = media_parse(builtin_tracks[i].text, media_freqs, media_durs, MEDIA_MAX_NOTES);
+    if (n < 0)
+        return;
+    media_nnotes = n;
+    media_kind = 0;
+    media_idx = i;
+    strset(media_name, sizeof media_name, builtin_tracks[i].name);
+    media_note = 0;
+    media_playing = media_paused = 0;
+    tone_freq(0, 0);
+}
+static void media_load_file(int id) {
+    if (id < 0 || (unsigned)id >= home.count)
+        return;
+    int n = media_parse(home.notes[id].body, media_freqs, media_durs, MEDIA_MAX_NOTES);
+    if (n < 0) {
+        status("Not a valid .mus file (try: C4:1 E4:1 REST:1)");
+        return;
+    }
+    media_nnotes = n;
+    media_kind = 1;
+    media_idx = id;
+    strset(media_name, sizeof media_name, home.notes[id].name);
+    media_note = 0;
+    media_playing = media_paused = 0;
+    tone_freq(0, 0);
+    status("Loaded music file");
+}
+static void media_start(void) {
+    if (!media_nnotes) {
+        media_load_builtin(0);
+    }
+    media_note = 0;
+    media_playing = 1;
+    media_paused = 0;
+    media_end = ticks;
+    dirty = 1;
+}
+static void media_stop(void) {
+    media_playing = media_paused = 0;
+    media_note = 0;
+    tone_freq(0, 0);
+    dirty = 1;
+}
+static void media_tick(void) {
+    if (!media_playing || media_paused || !media_nnotes)
+        return;
+    if ((int)(ticks - media_end) >= 0) {
+        if (media_note >= media_nnotes) {
+            if (media_loop)
+                media_note = 0;
+            else {
+                media_playing = 0;
+                tone_freq(0, 0);
+                status("Finished playing");
+                return;
+            }
+        }
+        int f = media_freqs[media_note];
+        int d = media_durs[media_note];
+        media_end = ticks + d * 12;
+        tone_freq(f, media_vol);
+        media_note++;
+        dirty = 1;
+    } else if (ticks % 6 == 0)
+        dirty = 1;
+}
+static void media_step(int dir) {
+    int total = builtin_track_count;
+    for (unsigned i = 0; i < home.count; i++)
+        if (file_kind(i) == 1)
+            total++;
+    if (!total)
+        return;
+    int cur = 0;
+    if (media_kind == 0)
+        cur = media_idx;
+    else {
+        cur = builtin_track_count;
+        for (unsigned i = 0; i < home.count; i++)
+            if (file_kind(i) == 1) {
+                if ((int)i == media_idx)
+                    break;
+                cur++;
+            }
+    }
+    cur = (cur + dir + total) % total;
+    if (cur < builtin_track_count)
+        media_load_builtin(cur);
+    else {
+        int k = cur - builtin_track_count;
+        for (unsigned i = 0; i < home.count; i++)
+            if (file_kind(i) == 1) {
+                if (!k) {
+                    media_load_file(i);
+                    break;
+                }
+                k--;
+            }
+    }
+    media_start();
+}
+static void photos_load_builtin(int i) {
+    photo_kind = 0;
+    photo_idx = i;
+    photo_w = photo_h = 0;
+    strset(photo_name, sizeof photo_name, (const char *[]){"Sunset", "Mountains", "Ocean", "Pattern"}[i]);
+}
+static void photos_load_file(int id) {
+    if (id < 0 || (unsigned)id >= home.count)
+        return;
+    int w, h;
+    if (media_parse_image(home.notes[id].body, photo_buf, &w, &h)) {
+        status("Not a valid P1/P2/P3 picture file");
+        return;
+    }
+    photo_w = w;
+    photo_h = h;
+    photo_kind = 1;
+    photo_idx = id;
+    strset(photo_name, sizeof photo_name, home.notes[id].name);
+    status("Loaded picture");
+}
+static void photos_step(int dir) {
+    int total = 4;
+    for (unsigned i = 0; i < home.count; i++)
+        if (file_kind(i) == 2)
+            total++;
+    int cur = photo_kind == 0 ? photo_idx : 4;
+    if (photo_kind == 1) {
+        for (unsigned i = 0; i < home.count; i++)
+            if (file_kind(i) == 2) {
+                if ((int)i == photo_idx)
+                    break;
+                cur++;
+            }
+    }
+    cur = (cur + dir + total) % total;
+    if (cur < 4)
+        photos_load_builtin(cur);
+    else {
+        int k = cur - 4;
+        for (unsigned i = 0; i < home.count; i++)
+            if (file_kind(i) == 2) {
+                if (!k) {
+                    photos_load_file(i);
+                    break;
+                }
+                k--;
+            }
+    }
+    dirty = 1;
+}
+static int snake_rand(void) {
+    snake_seed = snake_seed * 1103515245 + 12345;
+    return (snake_seed >> 16) & 32767;
+}
+static void snake_food(void) {
+    for (int t = 0; t < 200; t++) {
+        int x = snake_rand() % 20, y = snake_rand() % 15, on = 0;
+        for (int i = 0; i < snake_len; i++)
+            if (snake_x[i] == x && snake_y[i] == y)
+                on = 1;
+        if (!on) {
+            snake_fx = x;
+            snake_fy = y;
+            return;
+        }
+    }
+}
+static void snake_reset(void) {
+    snake_len = 3;
+    snake_x[0] = 10;
+    snake_y[0] = 7;
+    snake_x[1] = 9;
+    snake_y[1] = 7;
+    snake_x[2] = 8;
+    snake_y[2] = 7;
+    snake_dir = 3;
+    snake_score = 0;
+    snake_running = 1;
+    snake_paused = snake_dead = 0;
+    snake_next = ticks + 6;
+    snake_food();
+    dirty = 1;
+}
+static void snake_step(void) {
+    int nx = snake_x[0], ny = snake_y[0];
+    if (snake_dir == 0)
+        ny--;
+    else if (snake_dir == 1)
+        ny++;
+    else if (snake_dir == 2)
+        nx--;
+    else
+        nx++;
+    if (nx < 0 || ny < 0 || nx >= 20 || ny >= 15) {
+        snake_dead = 1;
+        snake_running = 0;
+        if (snake_score > snake_high)
+            snake_high = snake_score;
+        status("Snake hit the wall / press Enter to restart");
+        return;
+    }
+    for (int i = 0; i < snake_len; i++)
+        if (snake_x[i] == nx && snake_y[i] == ny) {
+            snake_dead = 1;
+            snake_running = 0;
+            if (snake_score > snake_high)
+                snake_high = snake_score;
+            status("Snake bit itself / press Enter to restart");
+            return;
+        }
+    int grow = nx == snake_fx && ny == snake_fy;
+    int last = grow ? snake_len : snake_len - 1;
+    for (int i = last; i > 0; i--) {
+        snake_x[i] = snake_x[i - 1];
+        snake_y[i] = snake_y[i - 1];
+    }
+    snake_x[0] = nx;
+    snake_y[0] = ny;
+    if (grow) {
+        if (snake_len < 256)
+            snake_len++;
+        snake_score++;
+        snake_food();
+    }
+    dirty = 1;
+}
+static void snake_tick(void) {
+    if (active != SNAKE || !snake_running || snake_paused || snake_dead)
+        return;
+    if ((int)(ticks - snake_next) >= 0) {
+        snake_step();
+        snake_next = ticks + 6;
+    }
+}
+static void undo_push(void) {
+    memcpy(undo_buf[undo_next], draft, NOTE_CAP);
+    undo_next = (undo_next + 1) % 16;
+    if (undo_count < 16)
+        undo_count++;
+}
+static void undo_pop(void) {
+    if (!undo_count) {
+        status("Nothing to undo");
+        return;
+    }
+    undo_next = (undo_next + 15) % 16;
+    memcpy(draft, undo_buf[undo_next], NOTE_CAP);
+    undo_count--;
+    caret = length(draft);
+    sel_anchor = -1;
+    changed = autoroll = 1;
+    status("Undid last edit");
+}
+static void sel_range(int *lo, int *hi) {
+    if (sel_anchor < 0) {
+        *lo = *hi = -1;
+        return;
+    }
+    *lo = low(sel_anchor, caret);
+    *hi = high(sel_anchor, caret);
+}
+static void writer_copy_sel(void) {
+    int lo, hi;
+    sel_range(&lo, &hi);
+    if (lo < 0) {
+        strset(clipboard, sizeof clipboard, draft);
+        status("Document copied");
+        return;
+    }
+    int n = hi - lo;
+    if (n >= NOTE_CAP)
+        n = NOTE_CAP - 1;
+    memcpy(clipboard, draft + lo, n);
+    clipboard[n] = 0;
+    status("Selection copied");
+}
+static void writer_delete_sel(void) {
+    int lo, hi;
+    sel_range(&lo, &hi);
+    if (lo < 0)
+        return;
+    undo_push();
+    int n = length(draft);
+    for (int i = lo; i < n - (hi - lo); i++)
+        draft[i] = draft[i + (hi - lo)];
+    draft[n - (hi - lo)] = 0;
+    caret = lo;
+    sel_anchor = -1;
+    changed = autoroll = 1;
+}
+static void writer_paste(void) {
+    if (!clipboard[0]) {
+        status("Clipboard is empty");
+        return;
+    }
+    writer_delete_sel();
+    undo_push();
+    for (int i = 0; clipboard[i] && length(draft) < NOTE_CAP - 1; i++) {
+        int n = length(draft);
+        for (int j = n; j >= caret; j--)
+            draft[j + 1] = draft[j];
+        draft[caret++] = clipboard[i];
+    }
+    changed = autoroll = 1;
+    status("Pasted");
+}
+static void find_next(void) {
+    if (!find_buf[0]) {
+        status("Type a word to find, Enter searches");
+        return;
+    }
+    int n = length(draft), q = length(find_buf);
+    for (int pass = 0; pass < 2; pass++) {
+        int from = pass ? 0 : caret + 1;
+        int to = pass ? caret + 1 : n - q + 1;
+        for (int i = from; i < to && i + q <= n; i++) {
+            int ok = 1;
+            for (int j = 0; j < q; j++)
+                if (draft[i + j] != find_buf[j]) {
+                    ok = 0;
+                    break;
+                }
+            if (ok) {
+                caret = i;
+                sel_anchor = -1;
+                autoroll = 1;
+                status("Found / Enter finds next");
+                return;
+            }
+        }
+    }
+    status("Not found");
+}
+static int lower_match(const char *name, const char *filter) {
+    if (!filter[0])
+        return 1;
+    for (const char *p = name; *p; p++) {
+        int ok = 1;
+        for (int j = 0; filter[j]; j++) {
+            char c = p[j];
+            if (!c)
+                ok = 0;
+            else {
+                if (c >= 'A' && c <= 'Z')
+                    c += 32;
+                char f = filter[j];
+                if (f >= 'A' && f <= 'Z')
+                    f += 32;
+                if (c != f)
+                    ok = 0;
+            }
+            if (!ok)
+                break;
+        }
+        if (ok)
+            return 1;
+    }
+    return 0;
+}
+static void files_rebuild(void) {
+    file_list_n = 0;
+    for (unsigned i = 0; i < home.count; i++)
+        if (lower_match(home.notes[i].name, files_filter))
+            file_list[file_list_n++] = i;
+    for (int i = 0; i < file_list_n; i++)
+        for (int j = i + 1; j < file_list_n; j++) {
+            int a = file_list[i], b = file_list[j], swap = 0;
+            if (files_sort == 1)
+                swap = length(home.notes[a].body) < length(home.notes[b].body);
+            else {
+                const char *x = home.notes[a].name, *y = home.notes[b].name;
+                int k = 0;
+                while (x[k] && y[k] && x[k] == y[k])
+                    k++;
+                swap = files_sort == 2 ? (u8)x[k] < (u8)y[k] : (u8)x[k] > (u8)y[k];
+            }
+            if (swap) {
+                file_list[i] = b;
+                file_list[j] = a;
+            }
+        }
+}
+static void files_delete(int id) {
+    if (id < 0 || (unsigned)id >= home.count)
+        return;
+    if (pending_delete != id) {
+        pending_delete = id;
+        status("Click Delete again to confirm deleting this file");
+        return;
+    }
+    pending_delete = -1;
+    for (unsigned i = id; i + 1 < home.count; i++)
+        memcpy(&home.notes[i], &home.notes[i + 1], sizeof home.notes[i]);
+    home.count--;
+    if (editing == (int)id)
+        editing = -1;
+    else if (editing > (int)id)
+        editing--;
+    if (sel >= (int)home.count)
+        sel = high(0, (int)home.count - 1);
+    home_commit();
+    status("File deleted");
+    dirty = 1;
+}
+static void files_dup(int id) {
+    if (id < 0 || (unsigned)id >= home.count)
+        return;
+    char name[28];
+    for (int n = 1; n < 100; n++) {
+        strset(name, sizeof name, home.notes[id].name);
+        int len = length(name);
+        char suffix[8] = "-copy";
+        if (n > 1) {
+            decimal(suffix + 5, n);
+        }
+        int sl = length(suffix);
+        if (len + sl >= 28) {
+            name[28 - sl - 1] = 0;
+            len = length(name);
+        }
+        strset(name + len, sizeof name - len, suffix);
+        if (home_find(name) < 0) {
+            int nid = home_new(name);
+            if (nid < 0) {
+                status("No room for a copy (16 files maximum)");
+                return;
+            }
+            strset(home.notes[nid].body, NOTE_CAP, home.notes[id].body);
+            home_commit();
+            status("File duplicated");
+            return;
+        }
+    }
+    status("Could not find a free copy name");
+}
+static void sketch_save(void) {
+    static char buf[NOTE_CAP];
+    int pos = 0;
+    const char *head = "P1\n64 36\n";
+    for (int i = 0; head[i] && pos < NOTE_CAP - 1; i++)
+        buf[pos++] = head[i];
+    for (int y = 0; y < 36; y++) {
+        for (int x = 0; x < 64; x++) {
+            if (pos >= NOTE_CAP - 1)
+                break;
+            int on = pixels[y * 180 / 36][x * 320 / 64] ? 1 : 0;
+            buf[pos++] = on ? '1' : '0';
+            if (x < 63 && pos < NOTE_CAP - 1)
+                buf[pos++] = ' ';
+        }
+        if (pos < NOTE_CAP - 1)
+            buf[pos++] = '\n';
+    }
+    buf[pos] = 0;
+    for (int n = 0; n < 100; n++) {
+        char name[28] = "sketch";
+        if (n) {
+            strset(name + 6, sizeof name - 6, "-");
+            decimal(name + 7, n);
+        }
+        strset(name + length(name), sizeof name - length(name), ".pbm");
+        if (home_find(name) < 0) {
+            int id = home_new(name);
+            if (id < 0) {
+                status("No room to save drawing (16 files maximum)");
+                return;
+            }
+            strset(home.notes[id].body, NOTE_CAP, buf);
+            home_commit();
+            status("Drawing saved / open it in Photos");
+            return;
+        }
+    }
+    status("Could not find a free sketch name");
+}
+static void open_smart(int id) {
+    if (id < 0 || (unsigned)id >= home.count)
+        return;
+    sel = id;
+    int k = file_kind(id);
+    if (k == 1) {
+        media_load_file(id);
+        launch(MEDIA);
+    } else if (k == 2) {
+        photos_load_file(id);
+        launch(PHOTOS);
+    } else
+        open_note();
 }
 static void compute(void) {
     int v;
@@ -288,10 +907,71 @@ static void installpkg(int s) {
     print(result.detail);
     status(result.detail);
 }
+static void term_complete(void) {
+    static const char *const cmds[] = {
+        "packages", "runfile",  "run",     "install", "help",    "apps",   "ls",
+        "dir",      "cat",      "type",    "new",     "edit",    "save",   "lspci",
+        "drivers",  "echo",     "calc",    "uptime",  "ver",     "uname",  "disks",
+        "clear",    "cls",      "exit",    "open",    "rm",      "mv",     "cp",
+        "wc",       "find",     "play",    "view"};
+    char *sp = command;
+    while (*sp && *sp != ' ')
+        sp++;
+    if (*sp) {
+        char cmd[32];
+        int clen = (int)(sp - command);
+        if (clen >= 32)
+            return;
+        memcpy(cmd, command, clen);
+        cmd[clen] = 0;
+        char *prefix = sp + 1;
+        int need_file = equal(cmd, "open") || equal(cmd, "cat") || equal(cmd, "type") ||
+                        equal(cmd, "edit") || equal(cmd, "new") || equal(cmd, "rm") ||
+                        equal(cmd, "mv") || equal(cmd, "cp") || equal(cmd, "wc") ||
+                        equal(cmd, "play") || equal(cmd, "view");
+        if (!need_file)
+            return;
+        int plen = length(prefix);
+        for (unsigned i = 0; i < home.count; i++) {
+            const char *name = home.notes[i].name;
+            int ok = 1;
+            for (int j = 0; j < plen; j++)
+                if (name[j] != prefix[j])
+                    ok = 0;
+            if (ok && length(name) > plen) {
+                strset(prefix, sizeof command - (prefix - command), name + plen);
+                return;
+            }
+        }
+        return;
+    }
+    int plen = length(command);
+    for (unsigned i = 0; i < sizeof cmds / sizeof *cmds; i++) {
+        int ok = 1;
+        for (int j = 0; j < plen; j++)
+            if (cmds[i][j] != command[j])
+                ok = 0;
+        if (ok && length(cmds[i]) > plen) {
+            strset(command + plen, sizeof command - plen, cmds[i] + plen);
+            return;
+        }
+    }
+}
 static void execute(void) {
     char buf[160];
     strset(buf, sizeof buf, command);
-    strset(previous, sizeof previous, command);
+    if (command[0]) {
+        if (hist_n < 8 || !equal(history[hist_n - 1], command)) {
+            if (hist_n < 8)
+                strset(history[hist_n++], sizeof *history, command);
+            else {
+                for (int i = 1; i < 8; i++)
+                    strset(history[i - 1], sizeof *history, history[i]);
+                strset(history[7], sizeof *history, command);
+            }
+        }
+        hist_pos = hist_n;
+    }
     print(command);
     command[0] = 0;
     char *args = buf;
@@ -343,13 +1023,17 @@ static void execute(void) {
     } else if (equal(buf, "help")) {
         print("packages | install NAME | run NAME | runfile PATH | open imp");
         print("apps | open NAME | ls | cat FILE | edit FILE | new FILE | save");
-        print("calc EXPR | echo TEXT | uptime | disks | install | ver | clear | exit");
+        print("rm FILE | mv OLD NEW | cp SRC DST | wc FILE | find TEXT");
+        print("play FILE | view FILE | calc EXPR | echo TEXT | uptime | disks");
+        print("install | ver | clear | exit / Tab completes / Up recalls");
     } else if (equal(buf, "apps"))
         for (int i = 0; i < APPS; i++)
             print(app[i].cmd);
     else if (equal(buf, "ls") || equal(buf, "dir"))
-        for (unsigned i = 0; i < home.count; i++)
+        for (unsigned i = 0; i < home.count; i++) {
             print(home.notes[i].name);
+            logline(home.notes[i].name);
+        }
     else if (equal(buf, "cat") || equal(buf, "type")) {
         int i = home_find(args);
         if (i < 0)
@@ -382,7 +1066,122 @@ static void execute(void) {
         }
     } else if (equal(buf, "save"))
         save();
-    else if (equal(buf, "lspci") || equal(buf, "drivers")) {
+    else if (equal(buf, "rm")) {
+        int i = home_find(args);
+        if (i < 0)
+            print("Document not found");
+        else {
+            for (unsigned j = i; j + 1 < home.count; j++)
+                memcpy(&home.notes[j], &home.notes[j + 1], sizeof home.notes[j]);
+            home.count--;
+            if (editing == i)
+                editing = -1;
+            else if (editing > i)
+                editing--;
+            home_commit();
+            print("Deleted");
+            logline("Deleted");
+        }
+    } else if (equal(buf, "mv") && *args) {
+        char *sp2 = args;
+        while (*sp2 && *sp2 != ' ')
+            sp2++;
+        if (!*sp2)
+            print("Usage: mv OLD NEW");
+        else {
+            *sp2++ = 0;
+            while (*sp2 == ' ')
+                sp2++;
+            int i = home_find(args);
+            if (i < 0)
+                print("Document not found");
+            else if (!goodname(sp2) || home_find(sp2) >= 0)
+                print("Invalid or taken name");
+            else {
+                strset(home.notes[i].name, 28, sp2);
+                home_commit();
+                print("Renamed");
+                logline("Renamed");
+            }
+        }
+    } else if (equal(buf, "cp") && *args) {
+        char *sp2 = args;
+        while (*sp2 && *sp2 != ' ')
+            sp2++;
+        if (!*sp2)
+            print("Usage: cp SRC DST");
+        else {
+            *sp2++ = 0;
+            while (*sp2 == ' ')
+                sp2++;
+            int i = home_find(args);
+            if (i < 0)
+                print("Document not found");
+            else if (!goodname(sp2) || home_find(sp2) >= 0)
+                print("Invalid or taken name");
+            else {
+                int nid = home_new(sp2);
+                if (nid < 0)
+                    print("No room (16 files maximum)");
+                else {
+                    strset(home.notes[nid].body, NOTE_CAP, home.notes[i].body);
+                    home_commit();
+                    print("Copied");
+                    logline("Copied");
+                }
+            }
+        }
+    } else if (equal(buf, "wc")) {
+        int i = home_find(args);
+        if (i < 0)
+            print("Document not found");
+        else {
+            const char *s = home.notes[i].body;
+            int words = 0, lines = 1, inword = 0;
+            for (int j = 0; s[j]; j++) {
+                if (s[j] == '\n')
+                    lines++;
+                if (s[j] == ' ' || s[j] == '\n' || s[j] == '\t')
+                    inword = 0;
+                else if (!inword) {
+                    words++;
+                    inword = 1;
+                }
+            }
+            char b[64];
+            decimal(b, words);
+            add(b, sizeof b, ' ');
+            decimal(b + length(b), length(s));
+            add(b, sizeof b, ' ');
+            decimal(b + length(b), lines);
+            print(b);
+            logline(b);
+        }
+    } else if (equal(buf, "find") && *args) {
+        int found = 0;
+        for (unsigned i = 0; i < home.count; i++)
+            if (lower_match(home.notes[i].body, args)) {
+                print(home.notes[i].name);
+                logline(home.notes[i].name);
+                found = 1;
+            }
+        if (!found)
+            print("No matches");
+    } else if (equal(buf, "play")) {
+        int i = home_find(args);
+        if (i < 0)
+            print("Document not found");
+        else {
+            media_load_file(i);
+            launch(MEDIA);
+        }
+    } else if (equal(buf, "view")) {
+        int i = home_find(args);
+        if (i < 0)
+            print("Document not found");
+        else
+            open_smart(i);
+    } else if (equal(buf, "lspci") || equal(buf, "drivers")) {
         for (int i = 0; i < pci_devices(); i++)
             print(pci_device(i));
         print(pointer_name());
@@ -472,34 +1271,70 @@ static void heading(Rect a, const char *k, const char *name) {
     label(a.x, a.y + 19, name, 2, INK);
 }
 static void files_view(Rect a) {
+    files_rebuild();
     int wide = a.w >= 840, side = wide ? a.w / 3 : 0;
     heading(a, "HOME  /  COLLECTION", "Documents");
     button_at(rect(a.x + a.w - 126, a.y + 9, 126, 32), "+ New note", NEW, 0, 1);
     int top = a.y + 66, h = a.h - 120, rows = high(1, h / 49),
         cols = a.w - side >= 720 ? 2 : 1;
-    int per = rows * cols, first = sel / per * per;
+    int per = rows * cols;
+    int selpos = 0;
+    for (int i = 0; i < file_list_n; i++)
+        if (file_list[i] == sel)
+            selpos = i;
+    int first = selpos / per * per;
     int cw = (a.w - side) / cols;
-    for (int j = 0; j < per && first + j < (int)home.count; j++) {
-        int id = first + j;
+    if (rename_mode) {
+        Rect box = rect(a.x, top, a.w - side - 8, 36);
+        rounded(box, 9, 0xfff3bd);
+        char line[64] = "Rename: ";
+        strset(line + 8, sizeof line - 8, rename_buf);
+        label(box.x + 12, box.y + 9, line, 1, INK);
+        top += 44;
+        h -= 44;
+    } else if (files_search_mode || files_filter[0]) {
+        Rect box = rect(a.x, top, a.w - side - 8, 36);
+        rounded(box, 9, WHITE);
+        char line[64] = "Filter: ";
+        strset(line + 8, sizeof line - 8, files_filter);
+        label(box.x + 12, box.y + 9, line, 1, INK);
+        top += 44;
+        h -= 44;
+    }
+    for (int j = 0; j < per && first + j < file_list_n; j++) {
+        int id = file_list[first + j];
         Rect r = rect(a.x + j % cols * cw, top + j / cols * 49, cw - 8, 43);
         rounded(r, 10, sel == id ? 0xc0e4de : WHITE);
-        glyph(WRITER, r.x + 10, r.y + 8, 27);
-        shorten(r.x + 49, r.y + 11, home.notes[id].name, 1, INK, r.w - 58);
+        int k = file_kind(id);
+        glyph(k == 1 ? MEDIA : k == 2 ? PHOTOS : WRITER, r.x + 10, r.y + 8, 27);
+        shorten(r.x + 49, r.y + 6, home.notes[id].name, 1, INK, r.w - 58);
+        char info[48];
+        strset(info, sizeof info, k == 1 ? "Music / .mus, " : k == 2 ? "Picture, " : "Text, ");
+        decimal(info + length(info), length(home.notes[id].body));
+        strset(info + length(info), sizeof info - length(info), " bytes");
+        label(r.x + 49, r.y + 24, info, 0, DIM);
         target(r, CHOOSE, id);
     }
-    if (wide) {
+    if (!file_list_n)
+        label(a.x + 8, top + 10, "No files match / right-click for options", 0, DIM);
+    if (wide && sel >= 0 && (unsigned)sel < home.count) {
         Rect p = rect(a.x + a.w - side + 7, top, side - 7, h);
         rounded(p, 12, 0xe2eef2);
-        label(p.x + 15, p.y + 14, "DOCUMENT PREVIEW", 0, DIM);
+        label(p.x + 15, p.y + 14, "PREVIEW", 0, DIM);
         shorten(p.x + 15, p.y + 42, home.notes[sel].name, 1, INK, p.w - 30);
-        flow(rect(p.x + 15, p.y + 75, p.w - 30, p.h - 88), home.notes[sel].body, 0, DIM, 0,
+        int k = file_kind(sel);
+        label(p.x + 15, p.y + 62, k == 1 ? "Opens in Media" : k == 2 ? "Opens in Photos" : "Opens in Writer", 0, DIM);
+        flow(rect(p.x + 15, p.y + 85, p.w - 30, p.h - 98), home.notes[sel].body, 0, DIM, 0,
              -1, 0);
     }
-    button_at(rect(a.x, a.y + a.h - 36, 114, 32), "Open note", READ, 0, 1);
-    button_at(rect(a.x + 122, a.y + a.h - 36, 46, 32), "<", CHOOSE, high(0, first - per), 0);
+    button_at(rect(a.x, a.y + a.h - 36, 114, 32), "Open", READ, 0, 1);
+    button_at(rect(a.x + 122, a.y + a.h - 36, 46, 32), "<", CHOOSE,
+              file_list_n ? file_list[high(0, first - per)] : 0, 0);
     button_at(rect(a.x + 176, a.y + a.h - 36, 46, 32), ">", CHOOSE,
-              low(home.count - 1, first + per), 0);
-    shorten(a.x + 236, a.y + a.h - 30, home_state(), 0, DIM, a.w - 240);
+              file_list_n ? file_list[low(file_list_n - 1, first + per)] : 0, 0);
+    button_at(rect(a.x + 230, a.y + a.h - 36, 92, 32), "Search", FILES_SEARCH, 0, 0);
+    button_at(rect(a.x + 330, a.y + a.h - 36, 92, 32), "Sort", FILES_SORT, 0, 0);
+    shorten(a.x + 436, a.y + a.h - 30, home_state(), 0, DIM, a.w - 440);
 }
 static int pick_char(int row, int x) {
     int n = length(draft);
@@ -539,13 +1374,41 @@ static void writer_view(Rect a) {
     Rect tr = rect(paper.x + pad, paper.y + 16, paper.w - 2 * pad, paper.h - 32);
     int last = 0;
     editor_page = tr;
+    int slo, shi;
+    sel_range(&slo, &shi);
+    text_sel_lo = slo;
+    text_sel_hi = shi;
     int total = flow_map(tr, draft, 1, INK, scroll, caret, &last, positions);
+    text_sel_lo = text_sel_hi = -1;
     writer_rows = high(1, tr.h / 24);
     if (scroll >= total)
         scroll = high(0, total - 1);
-    label(a.x, a.y + a.h - 23,
-          changed ? "Draft / Ctrl+S saves" : "Ctrl+C copies document / Ctrl+V pastes", 0,
-          DIM);
+    {
+        int words = 0, lines = 1, inword = 0;
+        for (int i = 0; draft[i]; i++) {
+            if (draft[i] == '\n')
+                lines++;
+            if (draft[i] == ' ' || draft[i] == '\n' || draft[i] == '\t')
+                inword = 0;
+            else if (!inword) {
+                words++;
+                inword = 1;
+            }
+        }
+        char wc[64];
+        decimal(wc, words);
+        strset(wc + length(wc), sizeof wc - length(wc), " words / ");
+        decimal(wc + length(wc), length(draft));
+        strset(wc + length(wc), sizeof wc - length(wc), " chars / ");
+        decimal(wc + length(wc), lines);
+        strset(wc + length(wc), sizeof wc - length(wc), " lines");
+        label(a.x, a.y + a.h - 23, wc, 0, DIM);
+    }
+    if (find_mode) {
+        char line[80] = "Find: ";
+        strset(line + 6, sizeof line - 6, find_buf);
+        label(a.x + 220, a.y + a.h - 23, line, 0, INK);
+    }
     button_at(rect(a.x + a.w - 101, a.y + a.h - 32, 45, 29), "Up", DOCUP, 0, 0);
     button_at(rect(a.x + a.w - 51, a.y + a.h - 32, 51, 29), "Down", DOCDOWN, total, 0);
 }
@@ -566,6 +1429,16 @@ static void calculator(Rect a) {
                     display.w - 32);
     }
     int x = a.x + left, y = a.y + (left ? 0 : 93), w = a.w - left, h = a.h - (left ? 0 : 93);
+    {
+        const char *mems[] = {"MC", "MR", "M+", "M-"};
+        for (int j = 0; j < 4; j++)
+            button_at(rect(x + j * w / 4, y, w / 4 - 6, 30), mems[j], CALC_MEM, j, 0);
+        char memline[32] = "Memory: ";
+        decimal(memline + 8, calc_mem);
+        label(x + 8, y + 36, memline, 0, DIM);
+        y += 58;
+        h -= 58;
+    }
     const char *keys = "789/456*123-0C=+";
     for (int j = 0; j < 16; j++) {
         char s[] = {keys[j], 0};
@@ -669,6 +1542,10 @@ static void appearance(Rect p) {
               0);
     button_at(rect(p.x + pad, y + 36, p.w - 2 * pad, 29),
               home.wide_apps ? "New apps: maximized" : "New apps: windowed", WIDE, 0, 0);
+    button_at(rect(p.x + pad, y + 72, (p.w - 2 * pad - 8) / 2, 29),
+              gfx_fast ? "Graphics: Fast" : "Graphics: Fancy", GFX_TOGGLE, 0, gfx_fast);
+    button_at(rect(p.x + pad + (p.w - 2 * pad - 8) / 2 + 8, y + 72, (p.w - 2 * pad - 8) / 2, 29),
+              "Test sound", SOUND_TEST, 0, 0);
     button_at(rect(p.x + pad, p.y + p.h - 42, p.w - 2 * pad, 32), "Save preferences to Home",
               PREFSAVE, 0, 1);
 }
@@ -724,6 +1601,27 @@ static void info(Rect a) {
         label(p.x + 14, p.y + 12, keys[i], 0, DIM);
         shorten(p.x + 14, p.y + p.h / 2, vals[i], 1, INK, p.w - 28);
     }
+    {
+        int used = 0;
+        for (unsigned i = 0; i < home.count; i++)
+            used += length(home.notes[i].body) + 28;
+        int cap = NOTES * NOTE_CAP;
+        int bar_y = a.y + a.h - 82;
+        label(a.x, bar_y, "Home storage", 0, DIM);
+        Rect bar = rect(a.x + 110, bar_y, low(300, a.w - 340), 12);
+        rounded(bar, 6, 0xc3d8df);
+        rounded(rect(bar.x, bar.y, bar.w * used / cap, 12), 6, accents[home.accent]);
+        char stor[64];
+        decimal(stor, used);
+        strset(stor + length(stor), sizeof stor - length(stor), " / ");
+        decimal(stor + length(stor), cap);
+        strset(stor + length(stor), sizeof stor - length(stor), " bytes");
+        label(bar.x + bar.w + 12, bar_y - 2, stor, 0, DIM);
+        char up[32] = "Uptime ";
+        decimal(up + 7, ticks / 60);
+        strset(up + length(up), sizeof up - length(up), "s");
+        label(a.x, bar_y + 18, up, 0, DIM);
+    }
     int y = a.y + a.h - 47;
     shorten(a.x, y, install_status(), 0, DIM, a.w - 230);
     char progress[16];
@@ -748,16 +1646,35 @@ static void sketch(Rect a) {
             inks[j], BRUSH, j, j == brush);
     button_at(rect(a.x + (left ? 0 : 364), a.y + (left ? 184 : 0), 80, 32), "Clear", WIPE, 0,
               0);
+    if (left) {
+        label(a.x + 8, a.y + 222, "BRUSH SIZE", 0, DIM);
+        const char *sizes[] = {"Small", "Medium", "Large"};
+        for (int j = 0; j < 3; j++)
+            button_at(rect(a.x, a.y + 244 + 38 * j, 145, 32), sizes[j], SKETCH_SIZE, j,
+                      j == brush_size);
+        button_at(rect(a.x, a.y + 362, 145, 32), "Save .pbm", SKETCH_SAVE, 0, 1);
+        label(a.x + 8, a.y + 404, "Saved drawings open", 0, DIM);
+        label(a.x + 8, a.y + 420, "in Photos.", 0, DIM);
+    } else {
+        button_at(rect(a.x + 454, a.y, 110, 32), "Save .pbm", SKETCH_SAVE, 0, 1);
+    }
     int sx = paint_area.w, sy = paint_area.h;
     fill(paint_area, WHITE);
-    for (int y = 0; y < 180; y++)
-        for (int x = 0; x < 320; x++)
-            if (pixels[y][x]) {
-                int x0 = x * sx / 320, y0 = y * sy / 180;
-                fill(rect(paint_area.x + x0, paint_area.y + y0, (x + 1) * sx / 320 - x0,
-                          (y + 1) * sy / 180 - y0),
-                     colors[pixels[y][x] - 1]);
-            }
+    /* Direct buffer writes: fill() per pixel was the main repaint bottleneck. */
+    for (int y = 0; y < 180; y++) {
+        int y0 = paint_area.y + y * sy / 180, y1 = paint_area.y + (y + 1) * sy / 180;
+        if (y1 <= y0)
+            y1 = y0 + 1;
+        for (int x = 0; x < 320; x++) {
+            u8 v = pixels[y][x];
+            if (!v)
+                continue;
+            int x0 = paint_area.x + x * sx / 320, x1 = paint_area.x + (x + 1) * sx / 320;
+            if (x1 <= x0)
+                x1 = x0 + 1;
+            rect_direct(rect(x0, y0, x1 - x0, y1 - y0), colors[v - 1]);
+        }
+    }
 }
 static void clock_view(Rect a) {
     heading(a, "TIME  /  FOCUS", "Clock");
@@ -829,11 +1746,256 @@ static void clock_view(Rect a) {
         }
         rounded(rect(cx - 5, cy - 5, 10, 10), 5, INK);
     }
-    label(x, p.y + 102, timer, 1, INK);
-    int y = p.y + high(133, p.h - 57);
-    button_at(rect(x, y, 54, 32), "-", MINUTES, -1, 0);
-    button_at(rect(x + 61, y, 54, 32), "+", MINUTES, 1, 0);
-    button_at(rect(x + 124, y, 120, 32), alarm ? "Cancel timer" : "Start timer", ALARM, 0, 1);
+    if (clock_mode) {
+        u32 elapsed = sw_elapsed + (sw_running ? ticks - sw_start : 0);
+        char swt[32];
+        decimal(swt, elapsed / 3600);
+        strset(swt + length(swt), sizeof swt - length(swt), ":");
+        int mm = (elapsed / 60) % 60, ss = (elapsed % 60);
+        char part[8];
+        decimal(part, mm);
+        if (mm < 10) {
+            swt[length(swt)] = '0';
+            swt[length(swt) + 1] = 0;
+        }
+        strset(swt + length(swt), sizeof swt - length(swt), part);
+        strset(swt + length(swt), sizeof swt - length(swt), ":");
+        decimal(part, ss);
+        if (ss < 10) {
+            swt[length(swt)] = '0';
+            swt[length(swt) + 1] = 0;
+        }
+        strset(swt + length(swt), sizeof swt - length(swt), part);
+        label(x, p.y + 102, swt, 1, INK);
+        int y = p.y + high(133, p.h - 57);
+        button_at(rect(x, y, 120, 32), sw_running ? "Pause" : "Start", SW_START, 0, 1);
+        button_at(rect(x + 128, y, 90, 32), "Reset", SW_RESET, 0, 0);
+        button_at(rect(x + 226, y, 120, 32), "Timer", CLOCK_MODE, 0, 0);
+    } else {
+        label(x, p.y + 102, timer, 1, INK);
+        int y = p.y + high(133, p.h - 57);
+        button_at(rect(x, y, 54, 32), "-", MINUTES, -1, 0);
+        button_at(rect(x + 61, y, 54, 32), "+", MINUTES, 1, 0);
+        button_at(rect(x + 124, y, 120, 32), alarm ? "Cancel timer" : "Start timer", ALARM, 0, 1);
+        button_at(rect(x + 252, y, 130, 32), "Stopwatch", CLOCK_MODE, 0, 0);
+    }
+}
+static void media_view(Rect a) {
+    heading(a, "MEDIA  /  PC SPEAKER", "Music player");
+    int side = a.w >= 760 ? 240 : 0;
+    int y = a.y + 64;
+    label(a.x, y, "TRACKS", 0, DIM);
+    y += 24;
+    for (int i = 0; i < builtin_track_count; i++) {
+        Rect r = rect(a.x, y, side ? side - 14 : a.w, 30);
+        button_at(r, builtin_tracks[i].name, MEDIA_PREV, i, media_kind == 0 && media_idx == i);
+        y += 34;
+    }
+    for (unsigned i = 0; i < home.count; i++)
+        if (file_kind(i) == 1) {
+            Rect r = rect(a.x, y, side ? side - 14 : a.w, 30);
+            button_at(r, home.notes[i].name, MEDIA_PREV, 100 + (int)i,
+                      media_kind == 1 && media_idx == (int)i);
+            y += 34;
+        }
+    if (!side)
+        y = a.y + 64;
+    Rect p = rect(a.x + side, y, a.w - side, a.h - (y - a.y));
+    rounded(p, 12, WHITE);
+    int px = p.x + 16;
+    label(px, p.y + 14, "NOW PLAYING", 0, DIM);
+    shorten(px, p.y + 38, media_nnotes ? media_name : "Choose a track", 2, INK, p.w - 32);
+    char prog[48];
+    if (media_nnotes) {
+        strset(prog, sizeof prog, "Note ");
+        decimal(prog + 5, low(media_note, media_nnotes));
+        strset(prog + length(prog), sizeof prog - length(prog), " / ");
+        decimal(prog + length(prog), media_nnotes);
+        if (media_playing)
+            strset(prog + length(prog), sizeof prog - length(prog), media_paused ? " / Paused" : " / Playing");
+    } else
+        strset(prog, sizeof prog, "Built-in tunes + your .mus files");
+    label(px, p.y + 78, prog, 1, DIM);
+    Rect bar = rect(px, p.y + 104, p.w - 32, 14);
+    rounded(bar, 7, 0xc3d8df);
+    if (media_nnotes)
+        rounded(rect(bar.x, bar.y, bar.w * low(media_note, media_nnotes) / media_nnotes, 14), 7,
+                accents[home.accent]);
+    int vy = p.y + 132, vh = low(90, p.h - 220);
+    if (vh > 20) {
+        for (int i = 0; i < 16; i++) {
+            int f = media_playing && media_note > 0 && media_note <= media_nnotes
+                        ? media_freqs[media_note - 1]
+                        : 0;
+            int level = f ? bound(f / 8, 8, 100) : 8;
+            int wobble = media_playing ? (ticks / 6 + i * 7) % 30 : 0;
+            int hh = vh * bound(level + wobble - 15, 4, 100) / 100;
+            int bw = (p.w - 32) / 16;
+            rounded(rect(px + i * bw, vy + vh - hh, bw - 4, hh), 4, accents[home.accent]);
+        }
+    }
+    int by = p.y + p.h - 44;
+    button_at(rect(px, by, 110, 32), media_playing && !media_paused ? "Pause" : "Play", MEDIA_PLAY,
+              0, 1);
+    button_at(rect(px + 118, by, 80, 32), "Stop", MEDIA_STOP, 0, 0);
+    button_at(rect(px + 206, by, 80, 32), "Next", MEDIA_NEXT, 0, 0);
+    button_at(rect(px + 294, by, 90, 32), "Prev", MEDIA_PREV, -1, 0);
+    label(px, by - 26, "Volume (speaker)", 0, DIM);
+    Rect vol = rect(px, by - 18, low(240, p.w - 32), 12);
+    rounded(vol, 6, 0xc3d8df);
+    rounded(rect(vol.x, vol.y, vol.w * media_vol / 100, 12), 6, accents[home.accent]);
+    media_thumb = rect(vol.x, vol.y - 8, vol.w, 28);
+    target(media_thumb, MEDIA_VOL, 0);
+}
+static void photos_view(Rect a) {
+    heading(a, "PHOTOS  /  NETPBM", "Picture viewer");
+    int side = a.w >= 760 ? 220 : 0;
+    int y = a.y + 64;
+    label(a.x, y, "PICTURES", 0, DIM);
+    y += 24;
+    const char *builtins[] = {"Sunset", "Mountains", "Ocean", "Pattern"};
+    for (int i = 0; i < 4; i++) {
+        Rect r = rect(a.x, y, side ? side - 14 : a.w, 30);
+        button_at(r, builtins[i], PHOTOS_PREV, i, photo_kind == 0 && photo_idx == i);
+        y += 34;
+    }
+    for (unsigned i = 0; i < home.count; i++)
+        if (file_kind(i) == 2) {
+            Rect r = rect(a.x, y, side ? side - 14 : a.w, 30);
+            button_at(r, home.notes[i].name, PHOTOS_PREV, 100 + (int)i,
+                      photo_kind == 1 && photo_idx == (int)i);
+            y += 34;
+        }
+    if (!side)
+        y = a.y + 64;
+    Rect p = rect(a.x + side, y, a.w - side, a.h - (y - a.y));
+    rounded(p, 12, 0x183b50);
+    Rect img = rect(p.x + 12, p.y + 12, p.w - 24, p.h - 76);
+    clip(img);
+    if (photo_kind == 0) {
+        if (photo_idx == 0) {
+            for (int j = 0; j < img.h; j++)
+                fill(rect(img.x, img.y + j, img.w, 1),
+                     ((0xf0a060 * (img.h - j) + 0x3c456f * j) / img.h) & 0xffffff);
+            rounded(rect(img.x + img.w / 2 - 40, img.y + img.h / 3 - 40, 80, 80), 40, 0xffd94d);
+            for (int j = 0; j < img.h / 3; j++)
+                fill(rect(img.x, img.y + img.h - j * 4, img.w, 3), 0x2c5f4f);
+        } else if (photo_idx == 1) {
+            fill(img, 0x9fd4e8);
+            rounded(rect(img.x + img.w / 5, img.y + img.h / 5, img.w / 5, img.w / 5), 20, 0xffd94d);
+            for (int j = 0; j < img.h; j++) {
+                int peak = img.h / 2 - (j < img.w / 2 ? j : img.w - j) / 3;
+                if (img.y + j > img.y + peak)
+                    fill(rect(img.x, img.y + j, img.w, 1), 0x4a7a5f);
+            }
+            fill(rect(img.x, img.y + img.h - 30, img.w, 30), 0x3a6a4f);
+        } else if (photo_idx == 2) {
+            fill(img, 0x2a7ab8);
+            fill(rect(img.x, img.y, img.w, img.h / 3), 0x9fd4e8);
+            rounded(rect(img.x + img.w / 4, img.y + img.h / 6, 60, 60), 30, 0xffd94d);
+            for (int j = 0; j < 6; j++)
+                fill(rect(img.x, img.y + img.h / 3 + j * 14, img.w, 4), 0xffffff);
+        } else {
+            for (int j = 0; j < img.h; j += 24)
+                for (int i = 0; i < img.w; i += 24)
+                    fill(rect(img.x + i, img.y + j, 12, 12),
+                         ((i / 24 + j / 24) % 2) ? 0x117b78 : 0xf4fbff);
+        }
+    } else if (photo_w && photo_h) {
+        int dw, dh, ox, oy;
+        if (photo_zoom) {
+            dw = photo_w;
+            dh = photo_h;
+            ox = img.x + (img.w - dw) / 2;
+            oy = img.y + (img.h - dh) / 2;
+        } else {
+            int sx = img.w / photo_w, sy = img.h / photo_h;
+            int s = low(sx, sy);
+            if (s < 1)
+                s = 1;
+            dw = photo_w * s;
+            dh = photo_h * s;
+            ox = img.x + (img.w - dw) / 2;
+            oy = img.y + (img.h - dh) / 2;
+        }
+        for (int j = 0; j < dh; j++) {
+            int sy = photo_zoom ? j : j / high(1, dw / photo_w);
+            if (sy < 0 || sy >= photo_h)
+                continue;
+            for (int i = 0; i < dw; i++) {
+                int sx = photo_zoom ? i : i / high(1, dh / photo_h);
+                if (sx < 0 || sx >= photo_w)
+                    continue;
+                int src = (sy * photo_w + sx) * 3;
+                u32 c = (photo_buf[src] << 16) | (photo_buf[src + 1] << 8) | photo_buf[src + 2];
+                rect_direct(rect(ox + i, oy + j, 1, 1), c);
+            }
+        }
+    } else {
+        label(img.x + 16, img.y + 16, "Choose a picture", 1, WHITE);
+    }
+    clear_clip();
+    shorten(p.x + 12, p.y + p.h - 56, photo_name, 1, WHITE, p.w - 24);
+    if (photo_kind == 1 && photo_w) {
+        char dims[32];
+        decimal(dims, photo_w);
+        add(dims, sizeof dims, 'x');
+        decimal(dims + length(dims), photo_h);
+        label(p.x + 12, p.y + p.h - 36, dims, 0, 0x91dccc);
+    }
+    button_at(rect(p.x + p.w - 240, p.y + p.h - 52, 70, 32), "Prev", PHOTOS_PREV, -1, 0);
+    button_at(rect(p.x + p.w - 162, p.y + p.h - 52, 70, 32), "Next", PHOTOS_NEXT, 0, 0);
+    button_at(rect(p.x + p.w - 84, p.y + p.h - 52, 76, 32), photo_zoom ? "Fit" : "Actual", PHOTOS_ZOOM, 0, 0);
+}
+static void snake_view(Rect a) {
+    heading(a, "GAMES  /  ARCADE", "Snake");
+    int bw = a.w >= 760 ? 200 : 0;
+    Rect board_area = bw ? rect(a.x + bw, a.y + 64, a.w - bw, a.h - 108)
+                         : rect(a.x, a.y + 104, a.w, a.h - 212);
+    int cell = low(board_area.w / 20, board_area.h / 15);
+    if (cell < 4)
+        cell = 4;
+    int ox = board_area.x + (board_area.w - cell * 20) / 2;
+    int oy = board_area.y + (board_area.h - cell * 15) / 2;
+    rounded(rect(ox - 6, oy - 6, cell * 20 + 12, cell * 15 + 12), 10, 0x183b50);
+    for (int j = 0; j < 15; j++)
+        for (int i = 0; i < 20; i++)
+            fill(rect(ox + i * cell, oy + j * cell, cell, cell),
+                 (i + j) % 2 ? 0x1e4a3a : 0x265a48);
+    if (!snake_running && !snake_dead && !snake_len)
+        snake_reset();
+    for (int i = snake_len - 1; i >= 0; i--)
+        fill(rect(ox + snake_x[i] * cell, oy + snake_y[i] * cell, cell, cell),
+             i == 0 ? 0x7ee787 : 0x3fb950);
+    if (snake_running || snake_dead)
+        fill(rect(ox + snake_fx * cell, oy + snake_fy * cell, cell, cell), 0xff6b6b);
+    if (bw) {
+        label(a.x, a.y + 64, "SCORE", 0, DIM);
+        char sc[32];
+        decimal(sc, snake_score);
+        label(a.x, a.y + 88, sc, 2, INK);
+        label(a.x, a.y + 130, "BEST", 0, DIM);
+        decimal(sc, snake_high);
+        label(a.x, a.y + 154, sc, 2, INK);
+        button_at(rect(a.x, a.y + 200, 170, 32), snake_dead ? "Restart" : "New game", SNAKE_NEW, 0, 1);
+        button_at(rect(a.x, a.y + 240, 170, 32), snake_paused ? "Resume" : "Pause", SNAKE_PAUSE, 0, 0);
+        label(a.x, a.y + 290, "Arrow keys steer.", 0, DIM);
+        label(a.x, a.y + 308, "Space pauses.", 0, DIM);
+        if (snake_dead)
+            label(a.x, a.y + 340, "Game over!", 1, INK);
+    } else {
+        button_at(rect(a.x, a.y + 64, 110, 32), snake_dead ? "Restart" : "New", SNAKE_NEW, 0, 1);
+        button_at(rect(a.x + 118, a.y + 64, 110, 32), snake_paused ? "Resume" : "Pause", SNAKE_PAUSE, 0, 0);
+        char sc[32] = "Score ";
+        decimal(sc + 6, snake_score);
+        label(a.x + 240, a.y + 72, sc, 1, INK);
+    }
+    int dy = bw ? a.y + 380 : a.y + a.h - 108;
+    int dx = bw ? a.x + 60 : ox + cell * 9;
+    button_at(rect(dx, dy, 44, 32), "^", SNAKE_DIR, 0, 0);
+    button_at(rect(dx - 48, dy + 36, 44, 32), "<", SNAKE_DIR, 2, 0);
+    button_at(rect(dx + 48, dy + 36, 44, 32), ">", SNAKE_DIR, 3, 0);
+    button_at(rect(dx, dy + 72, 44, 32), "v", SNAKE_DIR, 1, 0);
 }
 /* Reference artwork uses 960 x 540 design coordinates; maintain square controls
  * even on 4:3 framebuffers. Anchor the assistant at the lower middle. */
@@ -935,7 +2097,6 @@ static void bubbles(void) {
     target(t, light ? LIGHT : SOUND, 0);
     target(rect(r.x, r.y, r.w, scale(32)), POP, light ? 3 : 4);
 }
-static int autoroll;
 static void paint_window(void) {
     geometry();
     if (mode[active] == 0)
@@ -1018,6 +2179,15 @@ static void paint_window(void) {
     case CLOCK:
         clock_view(area);
         break;
+    case MEDIA:
+        media_view(area);
+        break;
+    case PHOTOS:
+        photos_view(area);
+        break;
+    case SNAKE:
+        snake_view(area);
+        break;
     }
     clear_clip();
 }
@@ -1057,16 +2227,28 @@ static void repaint(void) {
         rounded(p, 13, 0x20495c);
         shorten(p.x + 16, p.y + 7, message, 0, WHITE, w - 32);
     }
+    if (ctx_kind) {
+        glass(rect(ctx_rect.x + 3, ctx_rect.y + 5, ctx_rect.w, ctx_rect.h), 10, 0x204f63, 120);
+        rounded(ctx_rect, 10, WHITE);
+        for (int i = 0; i < ctx_count; i++) {
+            Rect r = rect(ctx_rect.x + 4, ctx_rect.y + 4 + i * 26, ctx_rect.w - 8, 24);
+            rounded(r, 7, 0xe8f4f8);
+            label(r.x + 10, r.y + 4, ctx_items[i].label, 0, INK);
+            target(r, ctx_items[i].action, ctx_items[i].arg);
+        }
+    }
     present(home.light);
     cursor(mx, my);
     dirty = 0;
 }
 static void slider_set(int a, int x) {
-    Rect r = a == LIGHT ? thumb_light : thumb_sound;
+    Rect r = a == LIGHT ? thumb_light : a == MEDIA_VOL ? media_thumb : thumb_sound;
     int min = a == LIGHT ? 35 : 0;
     int v = min + bound(x - r.x, 0, r.w - 1) * (100 - min) / high(1, r.w - 1);
     if (a == LIGHT)
         home.light = v;
+    else if (a == MEDIA_VOL)
+        media_vol = v;
     else
         home.sound = v;
     dirty = 1;
@@ -1138,7 +2320,10 @@ static void action(int a, int arg) {
     case READ:
         if (arg)
             sel = arg - 1;
-        open_note();
+        if (active == FILES)
+            open_smart(sel);
+        else
+            open_note();
         break;
     case DOCUP:
         scroll = high(0, scroll - writer_rows);
@@ -1192,22 +2377,326 @@ static void action(int a, int arg) {
         if (!alarm)
             timer_minutes = bound(timer_minutes + arg, 1, 60);
         break;
+    case TERM_CLEAR:
+        nlines = 0;
+        break;
+    case TERM_HELP:
+        print("Type help for commands. Tab completes. Right-click for menu.");
+        break;
+    case WRITER_UNDO:
+        undo_pop();
+        break;
+    case WRITER_CUT:
+        if (sel_anchor < 0)
+            status("Select text first (Ctrl+A selects all)");
+        else {
+            writer_copy_sel();
+            writer_delete_sel();
+        }
+        break;
+    case WRITER_COPY:
+        writer_copy_sel();
+        break;
+    case WRITER_PASTE:
+        writer_paste();
+        break;
+    case WRITER_SELECTALL:
+        sel_anchor = 0;
+        caret = length(draft);
+        status("Selected all / Ctrl+C copies");
+        break;
+    case WRITER_FIND:
+        find_mode = 1;
+        find_buf[0] = 0;
+        status("Find: type, Enter searches, Esc cancels");
+        break;
+    case WRITER_COUNT:
+        status("See word count in the footer");
+        break;
+    case FILES_RENAME:
+        if (arg >= 0 && (unsigned)arg < home.count) {
+            rename_mode = 1;
+            rename_id = arg;
+            strset(rename_buf, sizeof rename_buf, home.notes[arg].name);
+            status("Type new name, Enter confirms, Esc cancels");
+        }
+        break;
+    case FILES_DUP:
+        files_dup(arg);
+        break;
+    case FILES_DEL:
+        files_delete(arg);
+        break;
+    case FILES_PROPS: {
+        if (arg >= 0 && (unsigned)arg < home.count) {
+            sel = arg;
+            char info[96];
+            strset(info, sizeof info, home.notes[arg].name);
+            strset(info + length(info), sizeof info - length(info), " / ");
+            decimal(info + length(info), length(home.notes[arg].body));
+            strset(info + length(info), sizeof info - length(info), " bytes / ");
+            int k = file_kind(arg);
+            strset(info + length(info), sizeof info - length(info),
+                   k == 1 ? "Music" : k == 2 ? "Picture" : "Text");
+            status(info);
+        }
+        break;
+    }
+    case FILES_SORT:
+        files_sort = (files_sort + 1) % 3;
+        status(files_sort == 1 ? "Sorted by size" : files_sort == 2 ? "Sorted Z to A" : "Sorted A to Z");
+        break;
+    case FILES_SEARCH:
+        files_search_mode = !files_search_mode;
+        if (!files_search_mode)
+            files_filter[0] = 0;
+        status(files_search_mode ? "Type to filter, Enter keeps, Esc clears" : "Filter cleared");
+        break;
+    case SKETCH_SAVE:
+        sketch_save();
+        break;
+    case SKETCH_SIZE:
+        brush_size = arg;
+        break;
+    case MEDIA_PLAY:
+        if (media_playing && !media_paused) {
+            media_paused = 1;
+            media_remain = media_end - ticks;
+            tone_freq(0, 0);
+        } else if (media_paused) {
+            media_paused = 0;
+            media_end = ticks + media_remain;
+        } else
+            media_start();
+        break;
+    case MEDIA_NEXT:
+        media_step(1);
+        break;
+    case MEDIA_PREV:
+        if (arg >= 100)
+            media_load_file(arg - 100);
+        else if (arg >= 0)
+            media_load_builtin(arg);
+        else
+            media_step(-1);
+        break;
+    case MEDIA_STOP:
+        media_stop();
+        break;
+    case MEDIA_VOL:
+        adjusting = MEDIA_VOL;
+        slider_set(MEDIA_VOL, mx);
+        break;
+    case PHOTOS_NEXT:
+        photos_step(1);
+        break;
+    case PHOTOS_PREV:
+        if (arg >= 100)
+            photos_load_file(arg - 100);
+        else if (arg >= 0)
+            photos_load_builtin(arg);
+        else
+            photos_step(-1);
+        break;
+    case PHOTOS_ZOOM:
+        photo_zoom ^= 1;
+        break;
+    case SNAKE_NEW:
+        snake_reset();
+        break;
+    case SNAKE_PAUSE:
+        snake_paused = !snake_paused;
+        break;
+    case SNAKE_DIR: {
+        int want = arg;
+        if (!((snake_dir == 0 && want == 1) || (snake_dir == 1 && want == 0) ||
+              (snake_dir == 2 && want == 3) || (snake_dir == 3 && want == 2)))
+            snake_dir = want;
+        break;
+    }
+    case CALC_COPY:
+        strset(clipboard, sizeof clipboard, answer);
+        status("Result copied / paste in Writer with Ctrl+V");
+        break;
+    case CALC_MEM:
+        if (arg == 0)
+            calc_mem = 0;
+        else if (arg == 1) {
+            decimal(expr, calc_mem);
+        } else {
+            int v;
+            const char *err;
+            if (evaluate(expr, &v, &err))
+                calc_mem = arg == 2 ? calc_mem + v : calc_mem - v;
+            else
+                status(err);
+        }
+        break;
+    case WALL_CYCLE:
+        home.wallpaper = (home.wallpaper + 1) % 3;
+        break;
+    case ABOUT:
+        launch(DEVICE);
+        break;
+    case SW_TOGGLE:
+    case CLOCK_MODE:
+        clock_mode ^= 1;
+        break;
+    case SW_START:
+        if (sw_running) {
+            sw_elapsed += ticks - sw_start;
+            sw_running = 0;
+        } else {
+            sw_start = ticks;
+            sw_running = 1;
+        }
+        break;
+    case SW_RESET:
+        sw_elapsed = 0;
+        sw_start = ticks;
+        break;
+    case GFX_TOGGLE:
+        gfx_fast ^= 1;
+        status(gfx_fast ? "Fast graphics on (smoother)" : "Fancy graphics on");
+        break;
+    case SOUND_TEST:
+        tone(home.sound);
+        status("Test tone played");
+        break;
     }
     dirty = 1;
 }
 static void dab(int x, int y) {
-    for (int j = -2; j <= 2; j++)
-        for (int i = -2; i <= 2; i++)
-            if (i * i + j * j <= 4 && (unsigned)(x + i) < 320 && (unsigned)(y + j) < 180)
+    int r = brush_size == 0 ? 2 : brush_size == 1 ? 4 : 7;
+    for (int j = -r; j <= r; j++)
+        for (int i = -r; i <= r; i++)
+            if (i * i + j * j <= r * r && (unsigned)(x + i) < 320 && (unsigned)(y + j) < 180)
                 pixels[y + j][x + i] = brush == 3 ? 0 : brush + 1;
 }
 static u32 last_click;
 static int last_id = -1;
+static void ctx_add(const char *label, int action, int arg) {
+    if (ctx_count < 10)
+        ctx_items[ctx_count++] = (struct CtxItem){label, action, arg};
+}
+static void close_ctx(void) {
+    ctx_kind = 0;
+    dirty = 1;
+}
+static void open_ctx(int x, int y) {
+    if (welcome)
+        return;
+    if (start) {
+        start = 0;
+        dirty = 1;
+        return;
+    }
+    ctx_count = 0;
+    ctx_arg = -1;
+    if (active >= 0 && hit(rect(frame.x, frame.y, frame.w, 45), x, y)) {
+        ctx_add(mode[active] == 2 ? "Restore window" : "Fullscreen", FULL, 0);
+        ctx_add(mode[active] == 1 ? "Restore" : "Maximize", RESTORE, 0);
+        ctx_add("Hide", HIDE, 0);
+        ctx_add("Close", HIDE, 0);
+    } else if (active == FILES) {
+        for (int i = count - 1; i >= 0; i--)
+            if (targets[i].action == CHOOSE && hit(targets[i].r, x, y)) {
+                ctx_arg = targets[i].arg;
+                break;
+            }
+        if (ctx_arg >= 0) {
+            ctx_add("Open", READ, 0);
+            ctx_add("Rename", FILES_RENAME, ctx_arg);
+            ctx_add("Duplicate", FILES_DUP, ctx_arg);
+            ctx_add("Delete", FILES_DEL, ctx_arg);
+            ctx_add("Properties", FILES_PROPS, ctx_arg);
+        }
+        ctx_add("+ New note", NEW, 0);
+        ctx_add("Search", FILES_SEARCH, 0);
+        ctx_add("Sort", FILES_SORT, 0);
+    } else if (active == WRITER) {
+        ctx_add("Save", SAVE, 0);
+        ctx_add("Undo", WRITER_UNDO, 0);
+        ctx_add("Cut", WRITER_CUT, 0);
+        ctx_add("Copy", WRITER_COPY, 0);
+        ctx_add("Paste", WRITER_PASTE, 0);
+        ctx_add("Select All", WRITER_SELECTALL, 0);
+        ctx_add("Find", WRITER_FIND, 0);
+        ctx_add("Word count", WRITER_COUNT, 0);
+        ctx_add("Close", HIDE, 0);
+    } else if (active == SKETCH) {
+        ctx_add("Save drawing (.pbm)", SKETCH_SAVE, 0);
+        ctx_add("Clear", WIPE, 0);
+        ctx_add("Brush: Small", SKETCH_SIZE, 0);
+        ctx_add("Brush: Medium", SKETCH_SIZE, 1);
+        ctx_add("Brush: Large", SKETCH_SIZE, 2);
+        ctx_add("Close", HIDE, 0);
+    } else if (active == TERM) {
+        ctx_add("Clear", TERM_CLEAR, 0);
+        ctx_add("Help", TERM_HELP, 0);
+        ctx_add("Close", HIDE, 0);
+    } else if (active == MEDIA) {
+        ctx_add(media_playing && !media_paused ? "Pause" : "Play", MEDIA_PLAY, 0);
+        ctx_add("Next track", MEDIA_NEXT, 0);
+        ctx_add("Stop", MEDIA_STOP, 0);
+        ctx_add("Close", HIDE, 0);
+    } else if (active == PHOTOS) {
+        ctx_add("Next picture", PHOTOS_NEXT, 0);
+        ctx_add("Previous picture", PHOTOS_PREV, -1);
+        ctx_add(photo_zoom ? "Fit to window" : "Actual size", PHOTOS_ZOOM, 0);
+        ctx_add("Close", HIDE, 0);
+    } else if (active == SNAKE) {
+        ctx_add("New game", SNAKE_NEW, 0);
+        ctx_add(snake_paused ? "Resume" : "Pause", SNAKE_PAUSE, 0);
+        ctx_add("Close", HIDE, 0);
+    } else if (active == CALC) {
+        ctx_add("Copy result", CALC_COPY, 0);
+        ctx_add("Clear", CLEAR, 0);
+        ctx_add("Close", HIDE, 0);
+    } else if (active >= 0) {
+        ctx_add(mode[active] == 2 ? "Restore window" : "Fullscreen", FULL, 0);
+        ctx_add(mode[active] == 1 ? "Restore" : "Maximize", RESTORE, 0);
+        ctx_add("Hide", HIDE, 0);
+    } else {
+        ctx_add("Terminal", OPEN, TERM);
+        ctx_add("All Apps", START, 0);
+        ctx_add("Files", OPEN, FILES);
+        ctx_add("Media", OPEN, MEDIA);
+        ctx_add("Photos", OPEN, PHOTOS);
+        ctx_add("Snake", OPEN, SNAKE);
+        ctx_add("Settings", OPEN, SETTINGS);
+        ctx_add("Change wallpaper", WALL_CYCLE, 0);
+        ctx_add("About", ABOUT, 0);
+    }
+    int w = 210, h = ctx_count * 26 + 8;
+    ctx_x = low(x, sw - w - 4);
+    ctx_y = low(y, sh - h - 4);
+    if (ctx_x < 2)
+        ctx_x = 2;
+    if (ctx_y < 2)
+        ctx_y = 2;
+    ctx_rect = rect(ctx_x, ctx_y, w, h);
+    ctx_kind = 1;
+    dirty = 1;
+    uart("ctx: ");
+    logline(active >= 0 ? app[active].cmd : "desktop");
+}
 static void pointer(int dx, int dy, int b) {
     mx = bound(mx + dx, 0, sw - 1);
     my = bound(my + dy, 0, sh - 1);
     int old = button;
     button = b;
+    if ((b & 2) && !(old & 2)) {
+        if (ctx_kind)
+            close_ctx();
+        else
+            open_ctx(mx, my);
+        return;
+    }
+    if (ctx_kind && (b & 1) && !(old & 1) && !hit(ctx_rect, mx, my)) {
+        close_ctx();
+        return;
+    }
     int reveal = mx < 8 || (railshow && mx <= scale(34));
     if (reveal != railshow) {
         railshow = reveal;
@@ -1235,9 +2724,16 @@ static void pointer(int dx, int dy, int b) {
         for (int i = count - 1; i >= 0; i--)
             if (hit(targets[i].r, mx, my)) {
                 int a = targets[i].action, id = targets[i].arg;
+                int was_ctx = ctx_kind && hit(ctx_rect, mx, my);
                 action(a, id);
-                if (a == CHOOSE && last_id == id && ticks - last_click < 24)
-                    open_note();
+                if (was_ctx)
+                    close_ctx();
+                if (a == CHOOSE && last_id == id && ticks - last_click < 24) {
+                    if (active == FILES)
+                        open_smart(id);
+                    else
+                        open_note();
+                }
                 last_id = a == CHOOSE ? id : -1;
                 last_click = ticks;
                 return;
@@ -1349,6 +2845,26 @@ static void keyboard(int raw) {
         return;
     }
     if (k == 1) {
+        if (ctx_kind) {
+            close_ctx();
+            return;
+        }
+        if (rename_mode) {
+            rename_mode = 0;
+            status("Rename cancelled");
+            return;
+        }
+        if (files_search_mode) {
+            files_search_mode = 0;
+            files_filter[0] = 0;
+            status("Filter cleared");
+            return;
+        }
+        if (find_mode) {
+            find_mode = 0;
+            status("Find cancelled");
+            return;
+        }
         if (pop) {
             pop = 0;
             return;
@@ -1377,60 +2893,150 @@ static void keyboard(int raw) {
         return;
     }
     char c = keychar(k);
+    if (rename_mode) {
+        if (k == 28) {
+            rename_mode = 0;
+            if (goodname(rename_buf) && (home_find(rename_buf) < 0 || home_find(rename_buf) == rename_id)) {
+                strset(home.notes[rename_id].name, 28, rename_buf);
+                home_commit();
+                status("File renamed");
+            } else
+                status("Invalid or taken name (lowercase, 27 chars max)");
+        } else if (k == 14 && rename_buf[0])
+            rename_buf[length(rename_buf) - 1] = 0;
+        else if (c >= 32)
+            add(rename_buf, sizeof rename_buf, c);
+        return;
+    }
+    if (files_search_mode) {
+        if (k == 28) {
+            files_search_mode = 0;
+            status("Filter applied / Esc clears");
+        } else if (k == 14 && files_filter[0])
+            files_filter[length(files_filter) - 1] = 0;
+        else if (c >= 32)
+            add(files_filter, sizeof files_filter, c);
+        return;
+    }
+    if (find_mode) {
+        if (k == 28)
+            find_next();
+        else if (k == 14 && find_buf[0])
+            find_buf[length(find_buf) - 1] = 0;
+        else if (c >= 32)
+            add(find_buf, sizeof find_buf, c);
+        return;
+    }
     if (active == WRITER) {
         if (ctrl && k == 31)
             save();
-        else if (ctrl && k == 46) {
-            strset(clipboard, sizeof clipboard, draft);
-            status("Document copied");
-        } else if (ctrl && k == 47) {
-            for (int i = 0; clipboard[i] && length(draft) < NOTE_CAP - 1; i++)
-                edit_insert(clipboard[i]);
-        } else if (ctrl && k == 19) {
+        else if (ctrl && k == 30) {
+            sel_anchor = 0;
+            caret = length(draft);
+            status("Selected all / Ctrl+C copies");
+        } else if (ctrl && k == 46)
+            writer_copy_sel();
+        else if (ctrl && k == 45) {
+            if (sel_anchor < 0)
+                status("Select text first (Ctrl+A selects all)");
+            else {
+                writer_copy_sel();
+                writer_delete_sel();
+            }
+        } else if (ctrl && k == 47)
+            writer_paste();
+        else if (ctrl && k == 44)
+            undo_pop();
+        else if (ctrl && k == 33)
+            action(WRITER_FIND, 0);
+        else if (ctrl && k == 19) {
             note_load(editing);
             status("Draft reverted to session copy");
         } else if (k == 331) {
-            caret = high(0, caret - 1);
+            if (sel_anchor >= 0) {
+                int lo, hi;
+                sel_range(&lo, &hi);
+                caret = lo;
+                sel_anchor = -1;
+            } else
+                caret = high(0, caret - 1);
             autoroll = 1;
         } else if (k == 333) {
-            caret = low(length(draft), caret + 1);
+            if (sel_anchor >= 0) {
+                int lo, hi;
+                sel_range(&lo, &hi);
+                caret = hi;
+                sel_anchor = -1;
+            } else
+                caret = low(length(draft), caret + 1);
             autoroll = 1;
         } else if (k == 328 || k == 336) {
+            sel_anchor = -1;
             caret = pick_char(positions[caret].row + (k == 328 ? -1 : 1), positions[caret].x);
             autoroll = 1;
         } else if (k == 327 || k == 335) {
+            sel_anchor = -1;
             caret = k == 327 ? 0 : length(draft);
             autoroll = 1;
         } else if (k == 329 || k == 337) {
             scroll = high(0, scroll + (k == 329 ? -1 : 1) * writer_rows);
-        } else if (k == 14 || k == 339)
-            erase(k == 339);
-        else if (k == 28 || c >= 32)
+        } else if (k == 14 || k == 339) {
+            if (sel_anchor >= 0)
+                writer_delete_sel();
+            else {
+                undo_push();
+                erase(k == 339);
+            }
+        } else if (k == 28 || c >= 32) {
+            if (sel_anchor >= 0)
+                writer_delete_sel();
+            undo_push();
             edit_insert(k == 28 ? '\n' : c);
+        }
     } else if (active == DEVICE && k == 23 && confirm_install) {
         action(INSTALL, 0);
     } else if (active == FILES) {
+        files_rebuild();
+        int pos = 0;
+        for (int i = 0; i < file_list_n; i++)
+            if (file_list[i] == sel)
+                pos = i;
         if (k == 328 || k == 331)
-            sel = high(0, sel - 1);
+            sel = file_list_n ? file_list[high(0, pos - 1)] : sel;
         if (k == 336 || k == 333)
-            sel = low(home.count - 1, sel + 1);
+            sel = file_list_n ? file_list[low(file_list_n - 1, pos + 1)] : sel;
         if (k == 28)
-            open_note();
+            open_smart(sel);
+        if (k == 339)
+            files_delete(sel);
         if (ctrl && k == 49)
             new_auto();
     } else if (active == TERM) {
         if (k == 28)
             execute();
+        else if (k == 15)
+            term_complete();
         else if (k == 14 && command[0])
             command[length(command) - 1] = 0;
-        else if (k == 328)
-            strset(command, sizeof command, previous);
-        else if (k == 329 || k == 337)
+        else if (k == 328) {
+            if (hist_pos > 0) {
+                hist_pos--;
+                strset(command, sizeof command, history[hist_pos]);
+            }
+        } else if (k == 336) {
+            if (hist_pos < hist_n - 1) {
+                hist_pos++;
+                strset(command, sizeof command, history[hist_pos]);
+            } else
+                command[0] = 0;
+        } else if (k == 329 || k == 337)
             termoff = bound(termoff + (k == 329 ? 6 : -6), 0, high(0, nlines - 1));
         else if (c >= 32)
             add(command, sizeof command, c);
     } else if (active == CALC) {
-        if (k == 28 || c == '=')
+        if (ctrl && k == 46)
+            action(CALC_COPY, 0);
+        else if (k == 28 || c == '=')
             compute();
         else if (k == 14 && expr[0])
             expr[length(expr) - 1] = 0;
@@ -1438,6 +3044,33 @@ static void keyboard(int raw) {
             action(CLEAR, 0);
         else if (c >= 32)
             add(expr, sizeof expr, c);
+    } else if (active == SNAKE) {
+        if (k == 328)
+            action(SNAKE_DIR, 0);
+        else if (k == 336)
+            action(SNAKE_DIR, 1);
+        else if (k == 331)
+            action(SNAKE_DIR, 2);
+        else if (k == 333)
+            action(SNAKE_DIR, 3);
+        else if (k == 57)
+            action(SNAKE_PAUSE, 0);
+        else if (k == 28 && (snake_dead || !snake_running))
+            snake_reset();
+    } else if (active == MEDIA) {
+        if (k == 57)
+            action(MEDIA_PLAY, 0);
+        else if (k == 333)
+            action(MEDIA_NEXT, 0);
+        else if (k == 331)
+            action(MEDIA_PREV, -1);
+    } else if (active == PHOTOS) {
+        if (k == 333)
+            action(PHOTOS_NEXT, 0);
+        else if (k == 331)
+            action(PHOTOS_PREV, -1);
+        else if (c == 'z' || c == 'Z')
+            action(PHOTOS_ZOOM, 0);
     }
 }
 static u8 rtc(int reg) {
@@ -1513,6 +3146,10 @@ void desktop(struct Display *d) {
         if (vm_pointer(&x, &y, &b))
             pointer(x * (sw - 1) / 65535 - mx, y * (sh - 1) / 65535 - my, b);
         update_clock();
+        media_tick();
+        snake_tick();
+        if (active == CLOCK && clock_mode && sw_running)
+            dirty = 1;
         if (alarm && (int)(ticks - alarm) >= 0) {
             alarm = 0;
             status("Focus timer finished");

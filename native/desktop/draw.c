@@ -1,6 +1,8 @@
 #include "draw.h"
 #include "atlas.h"
 int sw, sh;
+int gfx_fast;
+int text_sel_lo = -1, text_sel_hi = -1;
 static struct Display target;
 static u32 buffer[TARGET_W * TARGET_H];
 static Rect limits;
@@ -37,6 +39,15 @@ void fill(Rect r, u32 c) {
             p[x] = c;
     }
 }
+/* Fast path for callers that already know the rect is inside the clip. */
+void rect_direct(Rect r, u32 c) {
+    r = intersect(r, rect(0, 0, sw, sh));
+    for (int y = r.y; y < r.y + r.h; y++) {
+        u32 *p = buffer + y * sw + r.x;
+        for (int x = 0; x < r.w; x++)
+            p[x] = c;
+    }
+}
 static int inset(int y, int h, int radius) {
     int j = low(y, h - 1 - y);
     if (j >= radius)
@@ -54,6 +65,10 @@ void rounded(Rect r, int z, u32 c) {
     }
 }
 void glass(Rect r, int z, u32 color, int opacity) {
+    if (gfx_fast) {
+        rounded(r, z, color);
+        return;
+    }
     z = low(z, low(r.w, r.h) / 2);
     for (int y = 0; y < r.h; y++) {
         int d = inset(y, r.h, z);
@@ -169,8 +184,11 @@ int flow_map(Rect r, const char *s, int f, u32 color, int skip, int caret, int *
             x = 0;
             continue;
         }
-        if (y < r.y + r.h && y + step > r.y)
+        if (y < r.y + r.h && y + step > r.y) {
+            if (text_sel_lo >= 0 && i >= text_sel_lo && i < text_sel_hi)
+                fill(rect(r.x + x, y, adv, step), 0xbfe3f2);
             letter(r.x + x, y, ch, f, color);
+        }
         x += adv;
     }
     limits = old;
@@ -232,6 +250,10 @@ void present(int light) {
     brightness = light;
     volatile u32 *fb = (void *)target.base;
     int direct = target.r == 16 && target.g == 8 && target.b == 0 && light == 100;
+    if (direct && target.stride == (u32)sw) {
+        memcpy((void *)fb, buffer, (size_t)sw * sh * 4);
+        return;
+    }
     for (int y = 0; y < sh; y++) {
         volatile u32 *dst = fb + y * target.stride;
         u32 *src = buffer + y * sw;

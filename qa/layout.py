@@ -29,6 +29,9 @@ def verify(e, shots=None):
                 "sketch",
                 "clock",
                 "imp",
+                "media",
+                "photos",
+                "snake",
             ]:
                 g.key("f3")
                 g.type("open " + app + "\n")
