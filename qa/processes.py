@@ -52,6 +52,7 @@ def check(e, busybox):
             ]:
                 g.type("run " + line + "\n")
                 g.wait(want)
+            g.wait("Linux brk grow/shrink/zero-recommit passed")
             g.wait("process: PE64 user mode")
             g.wait("process: ELF64 user mode")
         if busybox:
@@ -84,7 +85,7 @@ def check(e, busybox):
                 "PASS: upstream static Linux BusyBox, output and exit status match Linux"
             )
     print(
-        "PASS: CPL3, PE calendar, Windows and Linux page lifecycles, app faults, timer preemption, return to desktop:",
+        "PASS: CPL3, PE calendar, Linux brk/mmap lifecycles, app faults, timer preemption, return to desktop:",
         e,
     )
 

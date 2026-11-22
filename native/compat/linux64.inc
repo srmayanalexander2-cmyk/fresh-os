@@ -19,12 +19,14 @@ static void linux_native(VM *v) {
         break;
     }
     case 11:
-        if (!(a & 4095) && region_free(a, b, 0))
+        if (!(b && a < CURRENT.brk_limit &&
+              (a >= CURRENT.brk_base || b > CURRENT.brk_base - a)) &&
+            !(a & 4095) && region_free(a, b, 0))
             ret = 0;
         break;
     case 12:
-        ret = 0;
-        break; /* no contiguous brk area; allocation is via mmap */
+        ret = linux_brk(v, a);
+        break;
     case 158:
         if (a == 0x1002 && b < (1ull << 47)) {
             user_fs = b;

@@ -12,6 +12,45 @@ _start:
  je timeout
  cmpb $'f',(%r12)
  je fault
+ /* Linux brk grows a writable heap, releases whole pages on shrink, and
+  * zeroes those pages when the break grows again. */
+ mov $12,%eax
+ xor %edi,%edi
+ syscall
+ test %rax,%rax
+ jz bad
+ mov %rax,%r14
+ lea 8192(%r14),%rdi
+ mov $12,%eax
+ syscall
+ cmp %rdi,%rax
+ jne bad
+ movb $0x51,(%r14)
+ movb $0x5a,4096(%r14)
+ lea 4096(%r14),%rdi
+ mov $12,%eax
+ syscall
+ cmp %rdi,%rax
+ jne bad
+ lea 8192(%r14),%rdi
+ mov $12,%eax
+ syscall
+ cmp %rdi,%rax
+ jne bad
+ cmpb $0,4096(%r14)
+ jne bad
+ cmpb $0x51,(%r14)
+ jne bad
+ mov %r14,%rdi
+ mov $12,%eax
+ syscall
+ cmp %rdi,%rax
+ jne bad
+ mov $1,%eax
+ mov $1,%edi
+ lea brkok(%rip),%rsi
+ mov $brkok_end-brkok,%edx
+ syscall
  mov $9,%eax
  xor %edi,%edi
  mov $8192,%esi
@@ -52,3 +91,6 @@ exit: mov $60,%eax
 fault: ud2
 timeout: pause
  jmp timeout
+.section .rodata
+brkok: .ascii "Linux brk grow/shrink/zero-recommit passed\n"
+brkok_end:

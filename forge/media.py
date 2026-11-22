@@ -449,7 +449,6 @@ def package(e):
             "docs/native-processes.md",
             "docs/chrome-acceptance.md",
             "docs/native-runtime-roadmap.md",
-            "docs/wine-port-roadmap.md",
             "extras/cal/cal.exe",
             "extras/cal/cal.c",
             "extras/cal/build.sh",

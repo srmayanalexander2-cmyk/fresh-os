@@ -2,6 +2,39 @@
 .text
 .global _start
 _start:
+ /* Exercise the bounded brk contract before opening the package resource. */
+ mov $45,%eax
+ xor %ebx,%ebx
+ int $0x80
+ test %eax,%eax
+ jz bad
+ mov %eax,%ebp
+ lea 8192(%ebp),%ebx
+ mov $45,%eax
+ int $0x80
+ cmp %ebx,%eax
+ jne bad
+ movb $0x51,(%ebp)
+ movb $0x5a,4096(%ebp)
+ lea 4096(%ebp),%ebx
+ mov $45,%eax
+ int $0x80
+ cmp %ebx,%eax
+ jne bad
+ lea 8192(%ebp),%ebx
+ mov $45,%eax
+ int $0x80
+ cmp %ebx,%eax
+ jne bad
+ cmpb $0,4096(%ebp)
+ jne bad
+ cmpb $0x51,(%ebp)
+ jne bad
+ mov %ebp,%ebx
+ mov $45,%eax
+ int $0x80
+ cmp %ebx,%eax
+ jne bad
  mov $5,%eax
  mov $path,%ebx
  xor %ecx,%ecx

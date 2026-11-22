@@ -19,7 +19,7 @@ Guest captures: [context menu](screens/p3/context-menu.jpg) · [Media](screens/p
 
 ## Native x64 development build
 
-See [native processes: execution model and interoperability checks](native-processes.md). `qa/processes.py` boots OVMF, installs a third-party Windows EXE, exercises Windows and Linux memory lifecycles, verifies fault handling and watchdog expiry, and launches another package afterward. An optional BusyBox comparison uses the same static ELF on Linux and FreshOS. The browser live preview uses **BIOS**, not this CPU backend. Guest captures: [Windows calendar](screens/native/win64-cal.jpg) · [Linux BusyBox](screens/native/linux-busybox.jpg).
+See [native processes: execution model and interoperability checks](native-processes.md). `qa/processes.py` boots OVMF, installs a third-party Windows EXE, exercises Windows memory and Linux `brk`/`mmap` lifecycles, verifies fault handling and watchdog expiry, and launches another package afterward. The shipped 32-bit Linux resource reader and 64-bit Linux hello are also tested on BIOS and UEFI by `qa/packages.py`. An optional BusyBox comparison uses the same static ELF on Linux and FreshOS. The browser live preview uses **BIOS**, not this CPU backend. Guest captures: [Windows calendar](screens/native/win64-cal.jpg) · [Linux BusyBox](screens/native/linux-busybox.jpg).
 
 ## IMP2 desktop and package checks
 

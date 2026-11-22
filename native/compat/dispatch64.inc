@@ -25,6 +25,14 @@ static int native64(VM *v) {
         goto bad;
     user_cs = v->wide ? 0x23 : 0x3b;
     region_reset(v->wide);
+    if (v->linuxabi) {
+        u64 bytes = REGION_BYTES / 2;
+        CURRENT.brk_base = REGION_BASE + REGION_BYTES - bytes;
+        CURRENT.brk_current = CURRENT.brk_base;
+        CURRENT.brk_limit = CURRENT.brk_base + bytes;
+        if (region_alloc(CURRENT.brk_base, bytes, R | WRT, 1, 0) != CURRENT.brk_base)
+            goto bad;
+    }
     clear((u8 *)app_heaps[process_bank], sizeof app_heaps[process_bank]);
     if (v->base < REGION_BASE + REGION_BYTES && v->base + v->size > REGION_BASE)
         goto bad;

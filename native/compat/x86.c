@@ -34,6 +34,7 @@ static struct {
 #endif
     Allocation allocs[128];
     char docname[32], arg0[128], argline[160];
+    u64 brk_base, brk_current, brk_limit;
     int doclen, docpos, writing, dialogs, opens;
     int (*document_read)(const char *, void *, u32);
     void (*show_box)(const char *);
@@ -104,6 +105,10 @@ static u8 *mem(VM *v, u64 a, u32 n, int access) {
     if (a >= STACK && a - STACK <= STACK_SIZE && n <= STACK_SIZE - (u32)(a - STACK) &&
         access != X)
         return CURRENT.stackmem + (u32)(a - STACK);
+    if (v->linuxabi && access != X && a >= CURRENT.brk_base && a <= CURRENT.brk_current &&
+        n <= CURRENT.brk_current - a && a - CURRENT.brk_base <= HEAP_SIZE &&
+        n <= HEAP_SIZE - (u32)(a - CURRENT.brk_base))
+        return CURRENT.heap + (u32)(a - CURRENT.brk_base);
     if (a >= HEAP && a - HEAP < HEAP_SIZE && access != X) {
         u32 pos = (u32)(a - HEAP);
         for (u32 i = 0; i < v->allocated; i++) {
@@ -370,6 +375,36 @@ static int text_name(const char *s) {
               s[n] == '_' || s[n] == '-'))
             return 0;
     return n > 0 && s[0] != '.';
+}
+static u64 linux_brk(VM *v, u64 requested) {
+    u64 current = CURRENT.brk_current;
+    if (!current || !requested)
+        return current;
+    if (requested < CURRENT.brk_base || requested > CURRENT.brk_limit ||
+        requested >= (1ull << (v->wide ? 47 : 32)))
+        return current;
+    if (!v->native) {
+        u32 old_off = (u32)(current - CURRENT.brk_base);
+        u32 new_off = (u32)(requested - CURRENT.brk_base);
+        if (new_off > old_off)
+            clear(CURRENT.heap + old_off, new_off - old_off);
+        else if (new_off < old_off)
+            clear(CURRENT.heap + new_off, old_off - new_off);
+        CURRENT.brk_current = requested;
+        return requested;
+    }
+#ifdef __x86_64__
+    u64 old_end = (current + 4095) & ~4095ull;
+    u64 new_end = (requested + 4095) & ~4095ull;
+    if (new_end > old_end && !region_commit(old_end, new_end - old_end, R | WRT))
+        return current;
+    if (new_end < old_end && !region_free(new_end, old_end - new_end, 2))
+        return current;
+    CURRENT.brk_current = requested;
+    return requested;
+#else
+    return current;
+#endif
 }
 
 static u32 screen_w = 1024, screen_h = 768;
@@ -1040,7 +1075,9 @@ static int cond(VM *v, int k) {
     return a[k >> 1] ^ (k & 1);
 }
 static void linux_call(VM *v, u64 call, u64 fd, u64 addr, u64 sz) {
-    if (call == 60 || call == 231) {
+    if (call == 12)
+        v->r[0] = linux_brk(v, fd);
+    else if (call == 60 || call == 231) {
         v->done = 1;
         v->res->exit_code = fd & 255;
     } else if (call == 39 || call == 186)
@@ -1109,6 +1146,7 @@ static void linux32_call(VM *v) {
                : id == 5            ? 2
                : id == 6            ? 3
                : id == 20           ? 39
+               : id == 45           ? 12
                : id == 224          ? 186
                                     : ~0u;
     linux_call(v, call, (u32)v->r[3], (u32)v->r[1], (u32)v->r[2]);
@@ -1247,6 +1285,10 @@ static void step(VM *v) {
                 set(v, r, n, operand(v, o, n));
             return;
         }
+        if (op == 0xc6 && group == 0) {
+            set(v, o, 1, fetch(v, 1));
+            return;
+        }
         if (op == 0xc7 && group == 0) {
             int s = n == 2 ? 2 : 4;
             u64 val = sx(fetch(v, s), s);
@@ -1272,12 +1314,13 @@ static void step(VM *v) {
                 return;
             }
         }
-        if (op == 0x81 || op == 0x83) {
-            int s = op == 0x83 ? 1 : n == 2 ? 2 : 4;
+        if (op == 0x80 || op == 0x81 || op == 0x83) {
+            int width = op == 0x80 ? 1 : n;
+            int s = op == 0x80 || op == 0x83 ? 1 : width == 2 ? 2 : 4;
             u64 val = sx(fetch(v, s), s);
-            u64 z = alu(v, group, operand(v, o, n), val, n);
+            u64 z = alu(v, group, operand(v, o, width), val, width);
             if (group != 7)
-                set(v, o, n, z);
+                set(v, o, width, z);
             return;
         }
         if (op == 0x85) {
@@ -1343,6 +1386,9 @@ static int execute(VM *state) {
     clear((u8 *)criticals[process_bank], sizeof criticals[process_bank]);
     CURRENT.doclen = -1;
     CURRENT.docpos = CURRENT.writing = CURRENT.dialogs = CURRENT.opens = 0;
+    CURRENT.brk_base = CURRENT.brk_current = HEAP;
+    CURRENT.brk_limit = HEAP + HEAP_SIZE;
+    clear(CURRENT.heap, sizeof CURRENT.heap);
     PeResult *r = v.res;
     if (!v.err) {
         v.r[4] = STACK + STACK_SIZE - 64;
