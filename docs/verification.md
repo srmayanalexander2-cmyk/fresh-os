@@ -39,9 +39,10 @@ The checks below used the compiled kernels, not the old desktop or a host-side r
 | Check | Result |
 |---|---|
 | Four editions × two firmware paths | `qa/boot.py` booted each ISO on BIOS (32 MiB RAM) and x64 OVMF (96 MiB). Each entered Terminal, created a named Writer note, saved it, switched fullscreen on and off, rebooted, reopened the note and saved more text. A separate host reader found the expected data in the two on-disk generations. |
-| App layouts | `qa/layout.py` on Normal and Lite opened Files, Writer, Calculator, Terminal, Settings, System, Sketch and Clock. F11 gave each app the full native client area, measured against the actual framebuffer dimensions. A PS/2 mouse click maximized Files. F11 from maximized restored to maximized. Injecting an NMI produced the vector-2 stop report. |
+| App layouts | `qa/layout.py` on Normal and Lite opened Files, Writer, Calculator, Terminal, Settings, System, Sketch, Clock, IMP, Media, Photos and Snake. F11 gave each app the full native client area, measured against the actual framebuffer dimensions. A VMware absolute-pointer click maximized Files. F11 from maximized restored to maximized. Injecting an NMI produced the vector-2 stop report. |
 | Installer | `qa/install.py VMware-Lite` on BIOS and UEFI checked that the blank destination was still marked before confirmation, then installed from the CD. The test compared the entire installed system region with the ISO bytes, removed the CD, booted from the IDE disk and saved a new document. |
 | Recovery and foreign disks | `qa/recovery.py` damaged the data of the newest of two committed snapshots in a test disk. The next boot recovered the older document; editing it and saving committed a valid replacement. A second disk containing foreign bytes remained byte-for-byte unchanged after attempts to install and save. |
+| First-run setup and taskbar | `qa/taskbar.py Lite` used VMware absolute-pointer input to enter setup, select top/bottom/left positions, verify maximized work-area bounds for left, bottom, and top, and check the saved Home setting. It also rewrote a disposable snapshot as the previous format, confirmed migration defaults to left, then verified the next save publishes the extended format. The same setup/migration and geometry test passed on `VMware-Lite --efi`. |
 | VMware profile | `qa/vmprofile.py` extracted the published ZIP layout and used the VMDK descriptor **and** its flat extent. A QEMU VMware VGA/vmport guest negotiated absolute input and clicked Open Files. It changed both sliders, wallpaper, accent, auto-hide and new-window behavior, then saved preferences; the host checked the fields written to disk. The installed VMDK booted on its own. This is a protocol/emulation test, not VMware Workstation or Fusion certification. |
 | Host unit tests | `qa/core.c` checks calculator precedence, parentheses, integer overflow, division by zero, incomplete input, Gregorian leap-year rules, month alignment, and the music/Netpbm parsers. |
 | Live preview | v86 running in headless Chromium booted the Normal ISO to the native workspace. This uses a **host** browser to emulate a PC. It does not put a web browser in the guest. |
@@ -59,6 +60,8 @@ python qa/layout.py Lite
 python qa/media.py Lite
 python qa/install.py VMware-Lite --efi
 python qa/recovery.py
+python qa/taskbar.py Lite
+python qa/taskbar.py VMware-Lite --efi
 python qa/vmprofile.py
 cc -O2 -Inative/core native/core/math.c native/core/calendar.c native/core/mediafmt.c native/core/base.c qa/core.c -o /tmp/stratus-check && /tmp/stratus-check
 ```

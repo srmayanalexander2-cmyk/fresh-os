@@ -19,7 +19,9 @@ enum {
     MEDIA,
     PHOTOS,
     SNAKE,
-    APPS
+    APPS,
+    ICON_GRID = APPS,
+    ICON_SMILE
 };
 struct App {
     const char *name, *hint, *cmd;
@@ -56,7 +58,10 @@ static struct TextPoint positions[NOTE_CAP];
 static int active = -1, opened[APPS], mode[APPS], start = 0, dirty = 1, mx, my, button, shift,
            ctrl, caps, railshow;
 static Rect frame, area, paint_area, thumb_light, thumb_sound;
-static int adjusting, welcome = 1;
+static int adjusting, welcome = 1, setup_mode;
+static int animation_frames, pulse_frames;
+static u32 animation_next, pulse_next;
+static Rect pulse_rect;
 static char message[120];
 static u32 expiry;
 static int sel, editing = -1, caret, scroll, changed;
@@ -188,7 +193,12 @@ enum {
     SW_RESET,
     GFX_TOGGLE,
     SOUND_TEST,
-    CLOCK_MODE
+    CLOCK_MODE,
+    TASKBAR_POS,
+    SETUP,
+    SETUP_BACK,
+    SETUP_TRY,
+    SETUP_INSTALL
 };
 struct Target {
     Rect r;
@@ -212,6 +222,41 @@ static void status(const char *s) {
     dirty = 1;
     logline(s);
 }
+static void begin_animation(void) {
+    animation_frames = gfx_fast ? 0 : 5;
+    animation_next = ticks + 1;
+    dirty = 1;
+}
+static void begin_pulse(Rect r) {
+    pulse_rect = r;
+    pulse_frames = 3;
+    pulse_next = ticks + 1;
+    dirty = 1;
+}
+static void animate_tick(void) {
+    if (animation_frames && (int)(ticks - animation_next) >= 0) {
+        animation_frames--;
+        animation_next = ticks + 2;
+        dirty = 1;
+    }
+    if (pulse_frames && (int)(ticks - pulse_next) >= 0) {
+        pulse_frames--;
+        pulse_next = ticks + 1;
+        dirty = 1;
+    }
+}
+static void pulse_outline(Rect r, int thickness, u32 color) {
+    fill(rect(r.x, r.y, r.w, thickness), color);
+    fill(rect(r.x, r.y + r.h - thickness, r.w, thickness), color);
+    fill(rect(r.x, r.y, thickness, r.h), color);
+    fill(rect(r.x + r.w - thickness, r.y, thickness, r.h), color);
+}
+static void paint_animation(void) {
+    if (animation_frames && !gfx_fast)
+        glass(rect(0, 0, sw, sh), 0, 0x2b5a67, animation_frames * 13);
+    if (pulse_frames)
+        pulse_outline(pulse_rect, pulse_frames, 0x18a999);
+}
 static void note_load(int i) {
     if (i < 0 || (unsigned)i >= home.count)
         return;
@@ -226,6 +271,7 @@ static void note_load(int i) {
 }
 static void launch(int id) {
     welcome = 0;
+    setup_mode = 0;
     confirm_install = 0;
     if (id < 0 || id >= APPS)
         return;
@@ -237,7 +283,7 @@ static void launch(int id) {
     start = 0;
     if (id == WRITER && editing < 0)
         note_load(sel);
-    dirty = 1;
+    begin_animation();
     uart("open: ");
     logline(app[id].cmd);
 }
@@ -1223,6 +1269,10 @@ static void execute(void) {
             print("Unknown command. Type help.");
     }
 }
+static int scale(int);
+static int taskbar_extent(void) {
+    return scale(home.taskbar_position == TASKBAR_LEFT ? 34 : 42);
+}
 static int docked(void) {
     return !(active >= 0 && mode[active] == 2) &&
            (!home.autohide || railshow || start || active < 0);
@@ -1230,8 +1280,13 @@ static int docked(void) {
 static void geometry(void) {
     int h = sh;
     if (active >= 0 && mode[active]) {
-        int left = docked() ? sw / 26 : 0;
-        frame = rect(left, 0, sw - left, h);
+        int extent = docked() ? taskbar_extent() : 0;
+        if (home.taskbar_position == TASKBAR_LEFT)
+            frame = rect(extent, 0, sw - extent, h);
+        else if (home.taskbar_position == TASKBAR_TOP)
+            frame = rect(0, extent, sw, h - extent);
+        else
+            frame = rect(0, 0, sw, h - extent);
     } else {
         int w = bound(sw * 72 / 100, 580, 980), fh = bound(h * 78 / 100, 360, 690);
         if (!placed[active]) {
@@ -1265,7 +1320,7 @@ static void viewmode(int which) {
     uart("x");
     decimal(s, area.h);
     logline(s);
-    dirty = 1;
+    begin_animation();
 }
 static void heading(Rect a, const char *k, const char *name) {
     label(a.x, a.y, k, 0, accents[home.accent]);
@@ -1479,7 +1534,12 @@ static void slider(Rect r, int v, int lo, const char *name, int action) {
     rounded(line, 4, 0xc3d8df);
     int k = (line.w - 1) * (v - lo) / (100 - lo);
     rounded(rect(line.x, line.y, k, 7), 4, accents[home.accent]);
-    glyph(8, line.x + k - 12, line.y - 10, 26);
+    if (action == LIGHT)
+        glyph(ICON_SMILE, line.x + k - 12, line.y - 10, 26);
+    else {
+        rounded(rect(line.x + k - 8, line.y - 4, 16, 15), 7, WHITE);
+        rounded(rect(line.x + k - 3, line.y + 1, 6, 5), 3, accents[home.accent]);
+    }
     Rect touch = rect(line.x, line.y - 12, line.w, 30);
     target(touch, action, 0);
     if (action == LIGHT)
@@ -1525,8 +1585,8 @@ static void appearance(Rect p) {
                   (const char *[]){"Lagoon", "Sky", "Orchid"}[i], ACCENT, i,
                   home.accent == (unsigned)i);
     int y = p.y + 82;
-    if (p.h > 370) {
-        int h = low(238, p.h - 234);
+    if (p.h > 430) {
+        int h = low(238, p.h - 303);
         Rect sample = rect(p.x + pad, y, p.w - 2 * pad, h);
         wallpaper(sample, home.wallpaper);
         Rect win =
@@ -1543,10 +1603,16 @@ static void appearance(Rect p) {
               0);
     button_at(rect(p.x + pad, y + 36, p.w - 2 * pad, 29),
               home.wide_apps ? "New apps: maximized" : "New apps: windowed", WIDE, 0, 0);
-    button_at(rect(p.x + pad, y + 72, (p.w - 2 * pad - 8) / 2, 29),
+    label(p.x + pad, y + 74, "TASKBAR POSITION", 0, DIM);
+    const char *positions[] = {"Left", "Bottom", "Top"};
+    int posw = (p.w - 2 * pad) / 3;
+    for (int i = 0; i < 3; i++)
+        button_at(rect(p.x + pad + i * posw, y + 94, posw - 4, 29), positions[i], TASKBAR_POS,
+                  i, home.taskbar_position == (unsigned)i);
+    int half = (p.w - 2 * pad - 8) / 2;
+    button_at(rect(p.x + pad, y + 132, half, 29),
               gfx_fast ? "Graphics: Fast" : "Graphics: Fancy", GFX_TOGGLE, 0, gfx_fast);
-    button_at(rect(p.x + pad + (p.w - 2 * pad - 8) / 2 + 8, y + 72, (p.w - 2 * pad - 8) / 2, 29),
-              "Test sound", SOUND_TEST, 0, 0);
+    button_at(rect(p.x + pad + half + 8, y + 132, half, 29), "Test sound", SOUND_TEST, 0, 0);
     button_at(rect(p.x + pad, p.y + p.h - 42, p.w - 2 * pad, 32), "Save preferences to Home",
               PREFSAVE, 0, 1);
 }
@@ -2011,11 +2077,62 @@ static void desk_date(char b[16]) {
     add(b, 16, '/');
     decimal(b + length(b), today);
 }
+static void horizontal_taskbar(void) {
+    int h = taskbar_extent(), top = home.taskbar_position == TASKBAR_TOP;
+    int y = top ? 0 : sh - h, pad = scale(4), gap = scale(3);
+    int bh = high(20, h - 2 * pad);
+    glass(rect(0, y, sw, h), 0, 0xeaf4f6, 238);
+    fill(rect(0, top ? h - 1 : y, sw, 1), 0x9ab8c3);
+    Rect start_button = rect(pad, y + (h - bh) / 2, scale(78), bh);
+    rounded(start_button, 8, start ? 0xc6e7e3 : 0xf6fbfd);
+    int icon = scale(20);
+    glyph(ICON_GRID, start_button.x + scale(4), start_button.y + (bh - icon) / 2, icon);
+    label(start_button.x + scale(28), start_button.y + (bh - 18) / 2, "Apps", 0, INK);
+    target(start_button, START, 0);
+
+    int nw = scale(40), vw = scale(44), lw = scale(54), tw = scale(64);
+    int total = nw + vw + lw + tw + 3 * gap;
+    int rx = sw - total - pad;
+    Rect net = rect(rx, y + (h - bh) / 2, nw, bh);
+    Rect vol = rect(net.x + nw + gap, net.y, vw, bh);
+    Rect light = rect(vol.x + vw + gap, net.y, lw, bh);
+    Rect clock = rect(light.x + lw + gap, net.y, tw, bh);
+    button_at(net, "Net", POP, 2, pop == 2);
+    button_at(vol, "Vol", POP, 3, pop == 3);
+    button_at(light, "Light", POP, 4, pop == 4);
+    shorten(clock.x + 3, clock.y + (clock.h - 18) / 2, timetext, 0, INK, clock.w - 6);
+    target(clock, OPEN, CLOCK);
+
+    int x = start_button.x + start_button.w + pad;
+    int right = rx - pad, slot = scale(86), available = high(0, right - x);
+    int slots = available / high(1, slot + gap), shown = 0;
+    if (active < 0) {
+        shorten(x, y + (h - 18) / 2, "Desktop", 0, DIM, available);
+        return;
+    }
+    for (int pass = 0; pass < 2 && shown < slots; pass++)
+        for (int i = 0; i < APPS && shown < slots; i++) {
+            if (!opened[i] || (pass == 0 ? i != active : i == active))
+                continue;
+            Rect r = rect(x + shown * (slot + gap), y + (h - bh) / 2, slot, bh);
+            rounded(r, 7, i == active ? 0xc6e7e3 : 0xf6fbfd);
+            int glyph_size = scale(20);
+            glyph(i, r.x + scale(3), r.y + (bh - glyph_size) / 2, glyph_size);
+            shorten(r.x + scale(26), r.y + (bh - 18) / 2, app[i].name, 0, INK,
+                    r.w - scale(29));
+            target(r, OPEN, i);
+            shown++;
+        }
+}
 static void dock(void) {
+    if (home.taskbar_position != TASKBAR_LEFT) {
+        horizontal_taskbar();
+        return;
+    }
     Rect rail = tile(0, 0, 34, 334);
     shell_art(start ? 1 : 0, rail);
     Rect head = tile(0, 0, 31, 39);
-    glyph(8, scale(5), scale(3), scale(21));
+    glyph(ICON_GRID, scale(5), scale(3), scale(21));
     center(head, scale(24), "Apps", 0, INK);
     target(head, START, 0);
     Rect clk = tile(0, 143, 31, 32);
@@ -2087,10 +2204,11 @@ static void welcome_screen(void) {
     rounded(rect(x, y, w, h), 20, 0x193f56);
     rounded(rect(x + 24, y + 20, 58, 5), 2, 0x53d8bd);
     label(x + 24, y + 38, "STRATUS  /  FRESHOS", 0, 0xa6dcd4);
-    label(x + 24, y + 60, "Welcome to your desktop", 2, WHITE);
+    glyph(ICON_SMILE, x + w - 55, y + 31, 28);
+    label(x + 24, y + 60, "Welcome to FreshOS", 2, WHITE);
     shorten(x + 24, y + 91,
-            "A native workspace with sample notes, music and pixel art. F1 opens apps; F3 opens Terminal.",
-            0, 0xd8e9ef, w - 48);
+            "Personalize your workspace, then try it live or install to the supplied Home disk.",
+            0, 0xd8e9ef, w - 90);
     int btn_y = y + h - 82, gap = 9;
     if (h >= 400) {
         int chip_w = (w - 48 - gap * 2) / 3;
@@ -2108,10 +2226,53 @@ static void welcome_screen(void) {
     app_tile(rect(x + 24 + card_w + gap, card_y, card_w, card_h), MEDIA, 0);
     app_tile(rect(x + 24 + 2 * (card_w + gap), card_y, card_w, card_h), PHOTOS, 0);
     int btn_gap = gap, btn_w = (w - 48 - btn_gap * 2) / 3;
-    button_at(rect(x + 24, btn_y, btn_w, 38), "Enter desktop", USE_OS, 0, 1);
-    button_at(rect(x + 24 + btn_w + btn_gap, btn_y, btn_w, 38), "All apps", START, 0, 0);
-    button_at(rect(x + 24 + 2 * (btn_w + btn_gap), btn_y, btn_w, 38), "Play Snake", OPEN, SNAKE, 0);
+    button_at(rect(x + 24, btn_y, btn_w, 38), "Try live", USE_OS, 0, 1);
+    button_at(rect(x + 24 + btn_w + btn_gap, btn_y, btn_w, 38), "Customize", SETUP, 0, 0);
+    button_at(rect(x + 24 + 2 * (btn_w + btn_gap), btn_y, btn_w, 38), "Install", SETUP, 1, 0);
     shorten(x + 24, y + h - 29, home_state(), 0, 0xc7dfe6, w - 48);
+}
+static void setup_view(void) {
+    wallpaper(rect(0, 0, sw, sh), home.wallpaper);
+    int w = low(sw - 32, bound(sw * 76 / 100, 480, 780));
+    int h = low(sh - 32, bound(sh * 70 / 100, 420, 560));
+    int x = (sw - w) / 2, y = (sh - h) / 2;
+    rounded(rect(x + 6, y + 8, w, h), 20, 0x17384b);
+    rounded(rect(x, y, w, h), 20, 0x193f56);
+    rounded(rect(x + 24, y + 20, 58, 5), 2, 0x53d8bd);
+    label(x + 24, y + 38, "SETUP  /  PERSONALIZATION", 0, 0xa6dcd4);
+    glyph(ICON_SMILE, x + w - 55, y + 31, 28);
+    label(x + 24, y + 58, "Make this workspace yours", 2, WHITE);
+    shorten(x + 24, y + 91,
+            "These preferences apply before you try the live desktop or confirm installation.",
+            0, 0xd8e9ef, w - 48);
+    int left = x + 24, roww = w - 48, cell = (roww - 16) / 3;
+    label(left, y + 116, "ACCENT", 0, 0xa6dcd4);
+    const char *accent_names[] = {"Lagoon", "Sky", "Orchid"};
+    for (int i = 0; i < 3; i++)
+        button_at(rect(left + i * (cell + 8), y + 134, cell, 30), accent_names[i], ACCENT, i,
+                  home.accent == (unsigned)i);
+    label(left, y + 174, "WALLPAPER", 0, 0xa6dcd4);
+    const char *wall_names[] = {"Sky", "Lagoon", "Dusk"};
+    for (int i = 0; i < 3; i++)
+        button_at(rect(left + i * (cell + 8), y + 192, cell, 30), wall_names[i], WALL, i,
+                  home.wallpaper == (unsigned)i);
+    label(left, y + 232, "TASKBAR POSITION", 0, 0xa6dcd4);
+    const char *pos_names[] = {"Left", "Bottom", "Top"};
+    for (int i = 0; i < 3; i++)
+        button_at(rect(left + i * (cell + 8), y + 250, cell, 30), pos_names[i], TASKBAR_POS, i,
+                  home.taskbar_position == (unsigned)i);
+    int half = (roww - 8) / 2;
+    button_at(rect(left, y + 291, half, 29), home.autohide ? "Auto-hide: on" : "Auto-hide: off",
+              AUTO, 0, home.autohide);
+    button_at(rect(left + half + 8, y + 291, half, 29),
+              home.wide_apps ? "New apps: maximized" : "New apps: windowed", WIDE, 0,
+              home.wide_apps);
+    button_at(rect(left, y + 326, roww, 29), "Open full Settings for more options", OPEN, SETTINGS,
+              0);
+    int btn_y = y + h - 52, btnw = cell;
+    button_at(rect(left, btn_y, btnw, 36), "Try live", SETUP_TRY, 0, 1);
+    button_at(rect(left + btnw + 8, btn_y, btnw, 36), "Continue install", SETUP_INSTALL, 0, 0);
+    button_at(rect(left + 2 * (btnw + 8), btn_y, btnw, 36), "Back", SETUP_BACK, 0, 0);
 }
 static void launcher(void) {
     int w = low(sw - 40, bound(sw * 72 / 100, 520, 760));
@@ -2134,8 +2295,16 @@ static void launcher(void) {
     button_at(rect(x + w - 150, footer + 7, 130, 32), "Back to desktop", START, 0, 0);
 }
 static void bubbles(void) {
+    int left = home.taskbar_position == TASKBAR_LEFT;
+    int top = home.taskbar_position == TASKBAR_TOP;
     if (start || pop == 1) {
-        Rect r = tile(0, 99, 96, 85);
+        Rect r;
+        if (left)
+            r = tile(0, 99, 96, 85);
+        else {
+            int rh = scale(85), rw = scale(160), edge = taskbar_extent();
+            r = rect(scale(8), top ? edge + scale(4) : sh - edge - rh - scale(4), rw, rh);
+        }
         shell_art(3, r);
         int last = -1, n = 0;
         for (int i = 0; i < APPS; i++)
@@ -2150,10 +2319,16 @@ static void bubbles(void) {
     }
     if (pop < 2)
         return;
-    int x = sw / 2, y = sh - scale(54);
-    glyph(8, x, y, scale(54));
-    target(rect(x, y, scale(54), scale(54)), POP, 0);
-    Rect r = rect(x + scale(27), sh - scale(124), scale(132), scale(102));
+    Rect r;
+    if (left) {
+        int s = scale(40), x = sw / 2, y = sh - s;
+        glyph(SETTINGS, x, y, s);
+        target(rect(x, y, s, s), POP, 0);
+        r = rect(x + scale(27), sh - scale(124), scale(132), scale(102));
+    } else {
+        int w = scale(132), h = scale(102), edge = taskbar_extent();
+        r = rect(sw - w - scale(8), top ? edge + scale(4) : sh - edge - h - scale(4), w, h);
+    }
     shell_art(pop == 3 ? 4 : 5, r);
     if (pop == 2) {
         center(r, r.y + scale(16), "Network", 1, INK);
@@ -2166,6 +2341,8 @@ static void bubbles(void) {
     rounded(t, 7, 0x09cbff);
     int pct = light ? (int)(home.light - 35) * 100 / 65 : (int)home.sound;
     rounded(rect(t.x, t.y, t.w * pct / 100, t.h), 7, 0x60f628);
+    int smile = scale(18);
+    glyph(ICON_SMILE, t.x + t.w * pct / 100 - smile / 2, t.y + (t.h - smile) / 2, smile);
     if (light)
         thumb_light = t;
     else
@@ -2271,7 +2448,11 @@ static void repaint(void) {
     clear_clip();
     count = 0;
     if (welcome) {
-        welcome_screen();
+        if (setup_mode)
+            setup_view();
+        else
+            welcome_screen();
+        paint_animation();
         present(home.light);
         cursor(mx, my);
         dirty = 0;
@@ -2294,7 +2475,10 @@ static void repaint(void) {
         bubbles();
     if (message[0]) {
         int w = low(sw - 20, width(message, 0) + 36);
-        Rect p = rect((sw - w) / 2, sh - 38, w, 32);
+        int y = sh - 38;
+        if (home.taskbar_position == TASKBAR_BOTTOM && docked())
+            y -= taskbar_extent();
+        Rect p = rect((sw - w) / 2, y, w, 32);
         rounded(p, 13, 0x20495c);
         shorten(p.x + 16, p.y + 7, message, 0, WHITE, w - 32);
     }
@@ -2308,6 +2492,7 @@ static void repaint(void) {
             target(r, ctx_items[i].action, ctx_items[i].arg);
         }
     }
+    paint_animation();
     present(home.light);
     cursor(mx, my);
     dirty = 0;
@@ -2328,11 +2513,43 @@ static void action(int a, int arg) {
     switch (a) {
     case WELCOME:
         welcome = 1;
+        setup_mode = 0;
         start = 0;
+        begin_animation();
         break;
     case USE_OS:
         welcome = 0;
+        setup_mode = 0;
+        begin_animation();
         break;
+    case SETUP:
+        setup_mode = 1;
+        start = 0;
+        pop = 0;
+        status(arg ? "Setup: personalize before installation" : "Setup: personalize before live use");
+        begin_animation();
+        break;
+    case SETUP_BACK:
+        setup_mode = 0;
+        begin_animation();
+        break;
+    case SETUP_TRY:
+        setup_mode = 0;
+        welcome = 0;
+        status(home_commit() ? "Setup saved to Home / live session ready"
+                            : "Setup active for this live session");
+        begin_animation();
+        break;
+    case SETUP_INSTALL: {
+        setup_mode = 0;
+        welcome = 0;
+        int saved = home_commit();
+        launch(DEVICE);
+        confirm_install = 1;
+        status(saved ? "Setup saved / review the marked install target"
+                     : "Setup active this session / review the install target");
+        break;
+    }
     case RUNPKG:
         if (package_pending(arg))
             installpkg(arg);
@@ -2341,6 +2558,7 @@ static void action(int a, int arg) {
         break;
     case POP:
         pop = pop == arg ? 0 : arg;
+        begin_animation();
         break;
     case MONTH:
         month_shift = bound(month_shift + arg, -120, 120);
@@ -2365,14 +2583,17 @@ static void action(int a, int arg) {
         break;
     case START:
         welcome = 0;
+        setup_mode = 0;
         pop = 0;
         start = !start;
         choice = 0;
+        begin_animation();
         break;
     case HIDE:
         confirm_install = 0;
         active = -1;
         logline("desktop");
+        begin_animation();
         break;
     case FULL:
         viewmode(2);
@@ -2415,18 +2636,30 @@ static void action(int a, int arg) {
         break;
     case WALL:
         home.wallpaper = arg;
+        begin_animation();
         break;
     case WIDE:
         home.wide_apps ^= 1;
+        begin_animation();
         break;
     case PREFPAGE:
         settings_tab = arg;
+        begin_animation();
         break;
     case ACCENT:
         home.accent = arg;
+        begin_animation();
         break;
     case AUTO:
         home.autohide = !home.autohide;
+        begin_animation();
+        break;
+    case TASKBAR_POS:
+        home.taskbar_position = bound(arg, TASKBAR_LEFT, TASKBAR_TOP);
+        railshow = 0;
+        status((const char *[]){"Taskbar: left", "Taskbar: bottom", "Taskbar: top"}[
+            home.taskbar_position]);
+        begin_animation();
         break;
     case PREFSAVE:
         status(home_commit() ? "Settings saved to Home" : "Settings applied / session only");
@@ -2606,6 +2839,7 @@ static void action(int a, int arg) {
         break;
     case WALL_CYCLE:
         home.wallpaper = (home.wallpaper + 1) % 3;
+        begin_animation();
         break;
     case ABOUT:
         launch(DEVICE);
@@ -2630,6 +2864,7 @@ static void action(int a, int arg) {
     case GFX_TOGGLE:
         gfx_fast ^= 1;
         status(gfx_fast ? "Fast graphics on (smoother)" : "Fancy graphics on");
+        begin_animation();
         break;
     case SOUND_TEST:
         tone(home.sound);
@@ -2769,7 +3004,13 @@ static void pointer(int dx, int dy, int b) {
         close_ctx();
         return;
     }
-    int reveal = mx < 8 || (railshow && mx <= scale(34));
+    int reveal;
+    if (home.taskbar_position == TASKBAR_LEFT)
+        reveal = mx < 8 || (railshow && mx <= taskbar_extent());
+    else if (home.taskbar_position == TASKBAR_TOP)
+        reveal = my < 8 || (railshow && my <= taskbar_extent());
+    else
+        reveal = my >= sh - 8 || (railshow && my >= sh - taskbar_extent());
     if (reveal != railshow) {
         railshow = reveal;
         if (home.autohide)
@@ -2796,10 +3037,16 @@ static void pointer(int dx, int dy, int b) {
         for (int i = count - 1; i >= 0; i--)
             if (hit(targets[i].r, mx, my)) {
                 int a = targets[i].action, id = targets[i].arg;
+                Rect press_rect = targets[i].r;
                 int was_ctx = ctx_kind && hit(ctx_rect, mx, my);
                 action(a, id);
                 if (was_ctx)
                     close_ctx();
+                if (!was_ctx && a != OPEN && a != START && a != HIDE && a != FULL &&
+                    a != RESTORE && a != USE_OS && a != SETUP && a != SETUP_BACK &&
+                    a != SETUP_TRY && a != SETUP_INSTALL && a != WELCOME && a != READ &&
+                    a != ABOUT)
+                    begin_pulse(press_rect);
                 if (a == CHOOSE && last_id == id && ticks - last_click < 24) {
                     if (active == FILES)
                         open_smart(id);
@@ -2894,8 +3141,17 @@ static void keyboard(int raw) {
     if (!down)
         return;
     dirty = 1;
+    if (welcome && setup_mode) {
+        if (k == 1)
+            action(SETUP_BACK, 0);
+        else if (k == 28)
+            action(SETUP_TRY, 0);
+        return;
+    }
     if (welcome) {
         welcome = 0;
+        setup_mode = 0;
+        begin_animation();
         if (k == 28 || k == 1)
             return;
     }
@@ -2906,6 +3162,7 @@ static void keyboard(int raw) {
     if (k == 59 || k == 347) {
         start = !start;
         choice = 0;
+        begin_animation();
         return;
     }
     if (k == 61) {
@@ -2942,11 +3199,13 @@ static void keyboard(int raw) {
             return;
         }
         confirm_install = 0;
-        if (start)
+        if (start) {
             start = 0;
-        else {
+            begin_animation();
+        } else {
             active = -1;
             logline("desktop");
+            begin_animation();
         }
         return;
     }
@@ -2960,8 +3219,10 @@ static void keyboard(int raw) {
         return;
     }
     if (active < 0) {
-        if (k == 28)
+        if (k == 28) {
             start = 1;
+            begin_animation();
+        }
         return;
     }
     char c = keychar(k);
@@ -3238,6 +3499,7 @@ void desktop(struct Display *d) {
             status(install_status());
         else if (work && active == DEVICE && before != install_progress())
             dirty = 1;
+        animate_tick();
         if (dirty)
             repaint();
         if (!work)

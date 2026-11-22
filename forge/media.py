@@ -57,6 +57,7 @@ def assets(d, lite):
             "#c96a9e",
             "#5aa469",
             "#e07a4f",
+            "#53a8a0",
         ]
     ):
         im = Image.new("RGBA", (64, 64))
@@ -116,14 +117,23 @@ def assets(d, lite):
             p.ellipse((46, 38, 54, 46), fill="white", outline=ink, width=2)
             p.ellipse((18, 18, 26, 26), fill="#ffd94d", outline=ink, width=2)
         if i == 8:
-            im = Image.open(ROOT / "assets/glyphs/smile.png").convert("RGBA")
-            im.putdata(
-                [
-                    (r, g, b, 0 if r > 190 and b > 180 and g < 95 else a)
-                    for r, g, b, a in im.get_flattened_data()
-                ]
-            )
+            p.polygon([(13, 23), (32, 13), (51, 23), (32, 33)], fill="#fff0ba", outline=ink)
+            p.polygon([(13, 23), (32, 33), (32, 51), (13, 41)], fill="#e4bd72", outline=ink)
+            p.polygon([(32, 33), (51, 23), (51, 41), (32, 51)], fill="#f7d891", outline=ink)
+            p.line((32, 33, 32, 51), fill=ink, width=2)
+        if i == 12:
+            for x, y in ((16, 16), (36, 16), (16, 36), (36, 36)):
+                p.rounded_rectangle((x, y, x + 12, y + 12), radius=3, fill="white")
         raw.extend(im.resize((32, 32), Image.Resampling.LANCZOS).tobytes())
+
+    smile = Image.open(ROOT / "assets/glyphs/smile.png").convert("RGBA")
+    smile.putdata(
+        [
+            (r, g, b, 0 if r > 190 and b > 180 and g < 95 else a)
+            for r, g, b, a in smile.get_flattened_data()
+        ]
+    )
+    raw.extend(smile.resize((32, 32), Image.Resampling.LANCZOS).tobytes())
 
     def arr(t, n, values):
         return f"static const {t} {n}[]={{" + ",".join(map(str, values)) + "};\n"
@@ -438,6 +448,8 @@ def package(e):
             "native/compat/imports.def",
             "docs/native-processes.md",
             "docs/chrome-acceptance.md",
+            "docs/native-runtime-roadmap.md",
+            "docs/wine-port-roadmap.md",
             "extras/cal/cal.exe",
             "extras/cal/cal.c",
             "extras/cal/build.sh",

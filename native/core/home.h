@@ -5,9 +5,12 @@
 struct Note {
     char name[28], body[NOTE_CAP];
 };
+enum { TASKBAR_LEFT, TASKBAR_BOTTOM, TASKBAR_TOP };
 struct Home {
     u32 count, light, sound, accent, autohide, wallpaper, wide_apps;
     struct Note notes[NOTES];
+    /* Appended so snapshots from earlier Stratus builds retain their layout. */
+    u32 taskbar_position;
 };
 extern struct Home home;
 unsigned disk_count(void);

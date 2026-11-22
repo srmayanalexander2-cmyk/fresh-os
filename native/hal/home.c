@@ -85,13 +85,14 @@ static void put32(u8 *p, u32 n) {
     for (int i = 0; i < 4; i++)
         p[i] = n >> (8 * i);
 }
-static u32 checksum(const struct Home *h) {
+static u32 checksum_bytes(const void *data, unsigned size) {
     u32 a = 2166136261u;
-    const u8 *p = (const u8 *)h;
-    for (unsigned i = 0; i < sizeof *h; i++)
+    const u8 *p = data;
+    for (unsigned i = 0; i < size; i++)
         a = (a ^ p[i]) * 16777619u;
     return a;
 }
+static u32 checksum(const struct Home *h) { return checksum_bytes(h, sizeof *h); }
 static int mount_disk(void) {
     u16 words[256], found = 0;
     u8 chosen = 0;
@@ -151,7 +152,8 @@ int goodname(const char *s) {
 static int valid(void) {
     if (!staging.count || staging.count > NOTES || staging.light < 35 ||
         staging.light > 100 || staging.sound > 100 || staging.accent > 2 ||
-        staging.autohide > 1 || staging.wallpaper > 2 || staging.wide_apps > 1)
+        staging.autohide > 1 || staging.wallpaper > 2 || staging.wide_apps > 1 ||
+        staging.taskbar_position > TASKBAR_TOP)
         return 0;
     for (unsigned i = 0; i < staging.count; i++) {
         struct Note *n = staging.notes + i;
@@ -165,11 +167,13 @@ static int valid(void) {
     }
     return 1;
 }
-static int transfer(int index, struct Home *h, int writing) {
+static int transfer_size(int index, void *data, unsigned size, int writing) {
     u8 tmp[512];
-    u8 *p = (u8 *)h;
-    for (unsigned off = 0; off < sizeof *h; off += 512) {
-        unsigned n = low(sizeof *h - off, 512);
+    u8 *p = data;
+    if (!size || size > 127 * 512)
+        return 0;
+    for (unsigned off = 0; off < size; off += 512) {
+        unsigned n = low(size - off, 512);
         if (writing) {
             memset(tmp, 0, 512);
             memcpy(tmp, p + off, n);
@@ -186,9 +190,15 @@ static int transfer(int index, struct Home *h, int writing) {
     }
     return 1;
 }
+static int transfer(int index, struct Home *h, int writing) {
+    return transfer_size(index, h, sizeof *h, writing);
+}
+#define HOME_V1_SIZE ((unsigned)__builtin_offsetof(struct Home, taskbar_position))
 _Static_assert(sizeof(struct Home) <= 127 * 512, "snapshot slot");
+_Static_assert(HOME_V1_SIZE + sizeof(u32) == sizeof(struct Home), "append-only Home format");
 void home_init(void) {
     home.light = 100;
+    home.taskbar_position = TASKBAR_LEFT;
     /* A blank Home disk should feel like a usable workspace, not an empty shell. */
     home.count = 4;
     strset(home.notes[0].name, 28, "welcome.txt");
@@ -227,8 +237,15 @@ void home_init(void) {
         if (!same(head, stamp, 8))
             continue;
         u32 gen = get32(head + 8);
-        if (get32(head + 12) != sizeof home || !transfer(i, &staging, 0) ||
-            get32(head + 16) != checksum(&staging) || !valid()) {
+        unsigned stored_size = get32(head + 12);
+        if (stored_size != sizeof home && stored_size != HOME_V1_SIZE) {
+            damaged = 1;
+            continue;
+        }
+        memset(&staging, 0, sizeof staging);
+        staging.taskbar_position = TASKBAR_LEFT;
+        if (!transfer_size(i, &staging, stored_size, 0) ||
+            get32(head + 16) != checksum_bytes(&staging, stored_size) || !valid()) {
             damaged = 1;
             continue;
         }

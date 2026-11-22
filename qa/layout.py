@@ -1,6 +1,6 @@
-"""Eight responsive sessions; inspect guest pixels and use actual mouse hit targets."""
+"""Twelve responsive app sessions with framebuffer checks and absolute-pointer hit testing."""
 
-import argparse, re, shutil, tempfile, time
+import argparse, json, re, shutil, socket, tempfile, time
 from pathlib import Path
 from PIL import Image
 from boot import Guest, ROOT
@@ -12,8 +12,49 @@ def verify(e, shots=None):
         d = Path(tmp)
         h = d / "Home.img"
         shutil.copyfile(src / "Home.img", h)
-        with Guest(d, src / f"FreshOS-{e}.iso", h, False) as g:
+        qmp_path = d / "qmp"
+        extra = [
+            "-machine",
+            "pc,vmport=on",
+            "-vga",
+            "vmware",
+            "-qmp",
+            f"unix:{qmp_path},server=on,wait=off",
+        ]
+        with Guest(d, src / f"FreshOS-{e}.iso", h, False, extra) as g:
             g.wait("workspace ready")
+            g.wait("VMware absolute pointer enabled")
+            qmp = socket.socket(socket.AF_UNIX)
+            qmp.connect(str(qmp_path))
+            stream = qmp.makefile("rwb")
+            json.loads(stream.readline())
+
+            def qmp_call(name, args=None):
+                command = {"execute": name}
+                if args is not None:
+                    command["arguments"] = args
+                stream.write(json.dumps(command).encode() + b"\n")
+                stream.flush()
+                while True:
+                    result = json.loads(stream.readline())
+                    assert "error" not in result, result
+                    if "return" in result:
+                        return result["return"]
+
+            qmp_call("qmp_capabilities")
+
+            def click_at(x, y):
+                point = [
+                    {"type": "abs", "data": {"axis": "x", "value": x * 32767 // (w - 1)}},
+                    {"type": "abs", "data": {"axis": "y", "value": y * 32767 // (height - 1)}},
+                ]
+                for events in (
+                    point,
+                    [{"type": "btn", "data": {"button": "left", "down": True}}],
+                    [{"type": "btn", "data": {"button": "left", "down": False}}],
+                ):
+                    qmp_call("input-send-event", {"events": events})
+                    time.sleep(0.15)
             g.key("ret")
             w, height = g.shot(d / "start.jpg")
             if shots:
@@ -55,29 +96,12 @@ def verify(e, shots=None):
                 g.wait("layout: " + app + " window")
                 g.key("esc")
 
-            # Hit the maximized Files button with PS/2 deltas. Start from the top-left corner.
-            def move(x, y):
-                while x or y:
-                    dx = max(-70, min(x, 70))
-                    dy = max(-70, min(y, 70))
-                    g.monitor(f"mouse_move {dx} {dy}")
-                    time.sleep(0.025)
-                    x -= dx
-                    y -= dy
-
-            def click():
-                g.monitor("mouse_button 1")
-                time.sleep(0.15)
-                g.monitor("mouse_button 0")
-                time.sleep(0.15)
-
+            # Click the Max button using the VMware absolute-pointer protocol.
             g.key("f3")
             g.type("open files\n")
-            move(-w, -height)
             fw = min(980, max(580, w * 72 // 100))
             fh = min(690, max(360, height * 78 // 100))
-            move((w - fw) // 2 + fw - 98, (height - fh) // 2 + 21)
-            click()
+            click_at((w - fw) // 2 + fw - 98, (height - fh) // 2 + 21)
             g.wait("layout: files maximized")
             g.key("f11")
             g.key("f11")
