@@ -1,5 +1,13 @@
 # Stratus verification
 
+## Preview 4: guided first run and sample-rich desktop
+
+Guest captures: [first-run screen](screens/p4/welcome.jpg) · [desktop hub](screens/p4/desktop.jpg) · [All Apps grid](screens/p4/all-apps.jpg) · [starter files](screens/p4/files.jpg) · [sample picture](screens/p4/sample-picture.jpg).
+
+* `qa/usability.py` clicks the first-run button and desktop Files tile with a real PS/2 mouse, opens Photos from the app grid, then smart-opens the seeded `example.mus` and `pattern.pbm` files into Media and Photos.
+* A fresh Home initializes four readable examples (`welcome.txt`, `ideas.txt`, `example.mus`, `pattern.pbm`); existing Home snapshots are left untouched. The welcome screen, desktop hub and All Apps grid present mouse and keyboard paths, F1/F3, and save/session status before users have to discover them.
+* `qa/vmprofile.py` selects Packages in All Apps and clicks Files from the hub via VMware absolute pointer; Settings persistence now checks the seeded Home record count as well.
+
 ## Preview 3: context menus, media, photos and file tools
 
 Guest captures: [context menu](screens/p3/context-menu.jpg) · [Media](screens/p3/media.jpg) · [Photos](screens/p3/photos.jpg) · [Snake](screens/p3/snake.jpg) · [Files](screens/p3/files.jpg) · [Writer](screens/p3/writer.jpg).
@@ -7,7 +15,7 @@ Guest captures: [context menu](screens/p3/context-menu.jpg) · [Media](screens/p
 * `qa/media.py` boots Lite, right-clicks the desktop (PS/2 right button) and clicks the Terminal menu item, creates `song.mus` and `pic.pbm` in Writer, exercises select-all/cut/undo/find, runs `wc`/`cp`/`mv`/`find`/`rm` in Terminal, smart-opens music into Media and the picture into Photos, starts Snake and steers it, right-clicks a Files row, and copies a Calculator result with Ctrl+C. All steps are checked against the guest serial log.
 * `qa/core.c` (host) checks the music and Netpbm parsers: note names, rests, sharps, ranges, malformed input, P1/P2/P3 decoding, comments and size limits, plus all four built-in tunes.
 * `qa/layout.py` now opens twelve apps (the nine previous plus Media, Photos and Snake) fullscreen and checks each layout against the framebuffer size.
-* All Preview 2 checks below still pass on the Preview 3 kernels (four editions × BIOS/EFI boot, packages, native processes, installer, recovery, VMware profile).
+* The Preview 3 context-menu/media checks below also pass on the Preview 4 kernels. Preview 4 was booted on BIOS and x64 UEFI for all four editions; Lite media/layout and VMware absolute-pointer profile tests passed.
 
 ## Native x64 development build
 
@@ -19,8 +27,8 @@ These are captures from the running native guest: [Welcome](screens/imp2/welcome
 
 * `qa/imp_tool.py` extracts the **shipped packer** and checks linking with/without the local DLL, rejection of a Linux interpreter dependency, and no changes to a foreign disk or a duplicate install.
 * `qa/packages.py` uses two guest boots per firmware. It refuses to launch an inbox package, installs it, executes real x86/x64 PE and static ELF programs, acknowledges the Windows dialogs, reads a newly supplied resource not on the ISO, rejects a corrupted package and reruns the installed DLL example after reboot.
-* `qa/vmprofile.py` clicks Use OS, opens the library via the rail, installs and runs the DLL example, dismisses its dialog with the mouse and opens Files from the radial menu. It also checks settings persistence and installation of the OS.
-* `qa/layout.py` exercises twelve native sessions including IMP Library, Media, Photos and Snake. The v86 preview mounts a temporary Home image; the installed DLL sample was also installed, opened and acknowledged in the browser-hosted VM. Reloading that page starts a new session. The browser hosting v86 is **not** Chrome running inside Stratus.
+* `qa/vmprofile.py` opens Packages from All Apps, installs and runs the DLL example, dismisses its dialog with the mouse and opens Files from the desktop hub. It also checks settings persistence and installation of the OS.
+* `qa/layout.py` exercises twelve native sessions including Packages, Media, Photos and Snake. The v86 preview mounts a temporary Home image; the installed DLL sample was also installed, opened and acknowledged in the browser-hosted VM. Reloading that page starts a new session. The browser hosting v86 is **not** Chrome running inside Stratus.
 
 See [IMP2](imp.md) for exact limits.
 

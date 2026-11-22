@@ -43,8 +43,6 @@ def check():
                             return result["return"]
 
                 call("qmp_capabilities")
-                scale = min(w / 960, h / 540)
-
                 def click(x, y):
                     for events in [
                         [
@@ -63,8 +61,25 @@ def check():
                         call("input-send-event", {"events": events})
                         time.sleep(0.2)
 
-                click(510 * w // 960, 455 * h // 540)  # Use OS
-                click(int(16 * scale), int(15 * scale))
+                def dashboard_app(app_id):
+                    picks = [0, 1, 9, 10, 11, 3]
+                    pw = min(w - 72, max(430, min(700, w * 70 // 100)))
+                    ph = min(h - 44, max(340, min(520, h * 68 // 100)))
+                    x0, y0 = (w - pw) // 2, (h - ph) // 2
+                    cw = (pw - 50) // 2
+                    ch = max(48, min(84, (ph - 58 - 112 - 20) // 3))
+                    index = picks.index(app_id)
+                    click(
+                        x0 + 20 + (index & 1) * (cw + 10) + cw // 2,
+                        y0 + 112 + (index // 2) * (ch + 10) + ch // 2,
+                    )
+
+                # Enter the new guided desktop, then select Packages from the visible app grid.
+                g.key("ret")
+                g.key("f1")
+                for _ in range(8):
+                    g.key("tab")
+                g.key("ret")
                 g.wait("open: imp")
                 # Windowed library, third row: inbox -> installed -> interactive Win32 dialog.
                 frame_x = (w - min(980, w * 72 // 100)) // 2
@@ -77,8 +92,7 @@ def check():
                 click(w // 2 + 198, h // 2 + 77)
                 g.wait("IMP: windll exit 0")
                 g.key("esc")
-                click(int(16 * scale), int(277 * scale))
-                click(int(115 * scale), int(216 * scale))
+                dashboard_app(0)  # Files shortcut on the desktop hub (absolute-pointer click)
                 g.wait("open: files")
                 g.key("f3")
                 g.type("settings\n")
@@ -99,7 +113,7 @@ def check():
                         "<7I", f.read(28)
                     )
                     assert (
-                        count == 1
+                        count == 4
                         and 60 <= light <= 70
                         and 45 <= sound <= 60
                         and (accent, hide, wall, wide) == (2, 1, 1, 1)

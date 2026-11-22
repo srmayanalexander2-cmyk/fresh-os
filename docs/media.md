@@ -17,9 +17,10 @@ C4:1 E4:1 G4:2 REST:1 C5:1
 Notes are `A`–`G`, optional `#`, octave `2`–`7` (for example `F#3`), or
 `REST` for silence. Beats are 1–16; one beat is 0.2 seconds. Media plays the
 file on the PC speaker with a visualizer, volume, next/previous and loop.
-Four built-in tunes are included. Create a file in Writer, save it as
-`song.mus`, then open it from Files (it opens in Media automatically),
-`play song.mus` in Terminal, or right-click it in Files.
+Four built-in tunes are included. A fresh Home disk also starts with
+`example.mus`; open it from Files or use `play example.mus` in Terminal. To
+make your own, create a file in Writer and save it as `song.mus`, then open
+it from Files (it opens in Media automatically) or right-click it in Files.
 
 ## Pictures (.pbm / .pgm / .ppm)
 
@@ -33,8 +34,9 @@ P1
 ```
 
 Sketch can save its canvas as a 64×36 `P1` file (`Save .pbm`); open the
-result in Photos. Four built-in scenes (Sunset, Mountains, Ocean, Pattern)
-are also available. Use Prev/Next and Fit/Actual zoom.
+result in Photos. A fresh Home disk includes `pattern.pbm` as a first example.
+Four built-in scenes (Sunset, Mountains, Ocean, Pattern) are also available.
+Use Prev/Next and Fit/Actual zoom.
 
 ## What this is not
 

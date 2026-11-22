@@ -34,7 +34,7 @@ static const struct App app[APPS] = {
     {"System", "Inspect the running kernel", "system", 0xc3a3d9},
     {"Sketch", "Draw on a scalable canvas", "sketch", 0xeaa096},
     {"Clock", "Local time and countdown", "clock", 0x9dbbe4},
-    {"IMP", "Installed packages", "imp", 0x11cdff},
+    {"Packages", "Install and run apps from Home", "imp", 0x11cdff},
     {"Media", "Music on the PC speaker", "media", 0xc96a9e},
     {"Photos", "View Netpbm pictures", "photos", 0x5aa469},
     {"Snake", "A classic arcade game", "snake", 0xe07a4f}};
@@ -225,6 +225,7 @@ static void note_load(int i) {
     find_mode = 0;
 }
 static void launch(int id) {
+    welcome = 0;
     confirm_install = 0;
     if (id < 0 || id >= APPS)
         return;
@@ -1997,8 +1998,7 @@ static void snake_view(Rect a) {
     button_at(rect(dx + 48, dy + 36, 44, 32), ">", SNAKE_DIR, 3, 0);
     button_at(rect(dx, dy + 72, 44, 32), "v", SNAKE_DIR, 1, 0);
 }
-/* Reference artwork uses 960 x 540 design coordinates; maintain square controls
- * even on 4:3 framebuffers. Anchor the assistant at the lower middle. */
+/* Dock artwork uses 960 x 540 reference coordinates; keep controls square on 4:3 screens. */
 static int scale(int v) { return v * low(sw * 1000 / 960, sh * 1000 / 540) / 1000; }
 static Rect tile(int x, int y, int w, int h) {
     return rect(scale(x), scale(y), scale(w), scale(h));
@@ -2016,8 +2016,8 @@ static void dock(void) {
     shell_art(start ? 1 : 0, rail);
     Rect head = tile(0, 0, 31, 39);
     glyph(8, scale(5), scale(3), scale(21));
-    center(head, scale(24), "IMP", 0, INK);
-    target(head, OPEN, PACKAGES);
+    center(head, scale(24), "Apps", 0, INK);
+    target(head, START, 0);
     Rect clk = tile(0, 143, 31, 32);
     char date[16];
     desk_date(date);
@@ -2031,31 +2031,107 @@ static void dock(void) {
     target(tile(0, 175, 30, 21), POP, 1);
     target(tile(0, 197, 30, 20), POP, 2);
     target(tile(0, 218, 30, 21), POP, 3);
-    target(tile(0, 242, 34, 88), START, 0);
+    Rect apps = tile(0, 242, 34, 88);
+    center(apps, apps.y + apps.h - scale(15), "F1", 0, WHITE);
+    target(apps, START, 0);
+}
+static void app_tile(Rect r, int id, int selected) {
+    rounded(r, 10, selected ? 0xc6e7e3 : 0xe7f1f5);
+    fill(rect(r.x + 2, r.y + 8, 3, r.h - 16), app[id].tint);
+    int size = bound(r.h - 22, 26, 36);
+    glyph(id, r.x + 12, r.y + (r.h - size) / 2, size);
+    label(r.x + 54, r.y + 9, app[id].name, 1, INK);
+    shorten(r.x + 54, r.y + 29, app[id].hint, 0, DIM, r.w - 62);
+    target(r, OPEN, id);
+}
+static void desktop_hub(void) {
+    int w = low(sw - 72, bound(sw * 70 / 100, 430, 700));
+    int h = low(sh - 44, bound(sh * 68 / 100, 340, 520));
+    int x = (sw - w) / 2, y = (sh - h) / 2;
+    Rect panel = rect(x, y, w, h);
+    rounded(rect(x + 5, y + 7, w, h), 18, 0x1c4055);
+    rounded(panel, 18, 0xf6fbfd);
+    rounded(rect(x + 20, y + 18, 52, 5), 2, accents[home.accent]);
+    label(x + 20, y + 32, "FRESHOS  /  YOUR WORKSPACE", 0, DIM);
+    label(x + 20, y + 52, "What would you like to do?", 2, INK);
+    shorten(x + 20, y + 82, "Choose an app. Sample notes, music and pixel art are ready in Files.",
+            0, DIM, w - 40);
+    static const int picks[] = {FILES, WRITER, MEDIA, PHOTOS, SNAKE, TERM};
+    int gap = 10, card_y = y + 112, bottom = y + h - 58;
+    int cw = (w - 40 - gap) / 2;
+    int ch = bound((bottom - card_y - 20) / 3, 48, 84);
+    for (int i = 0; i < 6; i++) {
+        Rect r = rect(x + 20 + (i & 1) * (cw + gap), card_y + (i / 2) * (ch + 10), cw, ch);
+        app_tile(r, picks[i], 0);
+    }
+    int last_end = card_y + 2 * (ch + 10) + ch;
+    int line_y = y + h - 54;
+    if (line_y - last_end >= 48) {
+        Rect tip = rect(x + 20, last_end + 8, w - 40, 34);
+        rounded(tip, 8, 0xe5f0f4);
+        shorten(tip.x + 10, tip.y + 12, "Tip: F3 then help shows commands. Ctrl+S saves. Esc returns here.",
+                0, DIM, tip.w - 20);
+    }
+    fill(rect(x + 18, line_y, w - 36, 1), 0xd8e6eb);
+    char home_line[64] = "Home: ";
+    strset(home_line + 6, sizeof home_line - 6, home_state());
+    shorten(x + 20, line_y + 14, home_line, 0, DIM, w - 184);
+    button_at(rect(x + w - 154, line_y + 6, 134, 32), "All apps  /  F1", START, 0, 1);
+}
+static void welcome_screen(void) {
+    wallpaper(rect(0, 0, sw, sh), home.wallpaper);
+    int w = low(sw - 36, bound(sw * 76 / 100, 460, 740));
+    int h = low(sh - 36, bound(sh * 55 / 100, 340, 420));
+    int x = (sw - w) / 2, y = (sh - h) / 2;
+    rounded(rect(x + 6, y + 8, w, h), 20, 0x17384b);
+    rounded(rect(x, y, w, h), 20, 0x193f56);
+    rounded(rect(x + 24, y + 20, 58, 5), 2, 0x53d8bd);
+    label(x + 24, y + 38, "STRATUS  /  FRESHOS", 0, 0xa6dcd4);
+    label(x + 24, y + 60, "Welcome to your desktop", 2, WHITE);
+    shorten(x + 24, y + 91,
+            "A native workspace with sample notes, music and pixel art. F1 opens apps; F3 opens Terminal.",
+            0, 0xd8e9ef, w - 48);
+    int btn_y = y + h - 82, gap = 9;
+    if (h >= 400) {
+        int chip_w = (w - 48 - gap * 2) / 3;
+        const char *tips[] = {"F1  Browse apps", "F3  Terminal", "Right-click  Actions"};
+        for (int i = 0; i < 3; i++) {
+            Rect chip = rect(x + 24 + i * (chip_w + gap), y + 126, chip_w, 36);
+            rounded(chip, 8, 0x28576a);
+            shorten(chip.x + 8, chip.y + 11, tips[i], 0, WHITE, chip.w - 16);
+        }
+    }
+    int card_h = bound(h / 5, 56, 100), card_y = btn_y - card_h - 24;
+    int card_w = (w - 48 - gap * 2) / 3;
+    label(x + 24, card_y - 18, "START WITH A SAMPLE  /  CLICK TO OPEN", 0, 0xa6dcd4);
+    app_tile(rect(x + 24, card_y, card_w, card_h), FILES, 0);
+    app_tile(rect(x + 24 + card_w + gap, card_y, card_w, card_h), MEDIA, 0);
+    app_tile(rect(x + 24 + 2 * (card_w + gap), card_y, card_w, card_h), PHOTOS, 0);
+    int btn_gap = gap, btn_w = (w - 48 - btn_gap * 2) / 3;
+    button_at(rect(x + 24, btn_y, btn_w, 38), "Enter desktop", USE_OS, 0, 1);
+    button_at(rect(x + 24 + btn_w + btn_gap, btn_y, btn_w, 38), "All apps", START, 0, 0);
+    button_at(rect(x + 24 + 2 * (btn_w + btn_gap), btn_y, btn_w, 38), "Play Snake", OPEN, SNAKE, 0);
+    shorten(x + 24, y + h - 29, home_state(), 0, 0xc7dfe6, w - 48);
 }
 static void launcher(void) {
-    Rect disc = tile(54, 157, 238, 238), clock = tile(239, 54, 184, 184);
-    shell_art(2, clock);
-    center(clock, clock.y + clock.h / 2 - scale(30),
-           timetext[0] == '0' ? timetext + 1 : timetext, sw >= 1280 ? 3 : 2, DIM);
-    char date[16];
-    desk_date(date);
-    center(clock, clock.y + clock.h / 2 + scale(17), date, sw >= 1280 ? 2 : 1, DIM);
-    target(clock, OPEN, CLOCK);
-    shell_art(2, disc);
-    center(disc, disc.y + scale(18), "All Apps", 1, DIM);
+    int w = low(sw - 40, bound(sw * 72 / 100, 520, 760));
+    int h = low(sh - 40, bound(sh * 72 / 100, 380, 610));
+    int x = (sw - w) / 2, y = (sh - h) / 2;
+    rounded(rect(x + 5, y + 7, w, h), 18, 0x1c4055);
+    rounded(rect(x, y, w, h), 18, 0xf6fbfd);
+    rounded(rect(x + 20, y + 18, 52, 5), 2, accents[home.accent]);
+    label(x + 20, y + 32, "APPLICATIONS", 0, DIM);
+    label(x + 20, y + 52, "All Apps", 2, INK);
+    shorten(x + 20, y + 82, "Click a card to open it. Esc returns to your desktop.", 0, DIM, w - 40);
+    int gap = 10, grid_y = y + 112, footer = y + h - 52;
+    int cw = (w - 40 - gap * 2) / 3;
+    int ch = bound((footer - grid_y - 40) / 4, 40, 88);
     for (int i = 0; i < APPS; i++) {
-        Rect r = tile(87 + i % 3 * 57, 201 + i / 3 * 47, 56, 45);
-        int size = scale(22);
-        if (i == choice)
-            glass(rect(r.x + 1, r.y, r.w - 2, r.h), 8, WHITE, 110);
-        glyph(i, r.x + (r.w - size) / 2, r.y, size);
-        center(r, r.y + size, app[i].name, 0, INK);
-        target(r, OPEN, i);
+        Rect r = rect(x + 20 + (i % 3) * (cw + gap), grid_y + (i / 3) * (ch + 10), cw, ch);
+        app_tile(r, i, i == choice);
     }
-    Rect intro = tile(158, 354, 30, 27);
-    glyph(8, intro.x, intro.y, scale(19));
-    target(intro, WELCOME, 0);
+    fill(rect(x + 18, footer, w - 36, 1), 0xd8e6eb);
+    button_at(rect(x + w - 150, footer + 7, 130, 32), "Back to desktop", START, 0, 0);
 }
 static void bubbles(void) {
     if (start || pop == 1) {
@@ -2195,14 +2271,7 @@ static void repaint(void) {
     clear_clip();
     count = 0;
     if (welcome) {
-        wallpaper(rect(0, 0, sw, sh), 3);
-        Rect use = rect(sw * 472 / 960, sh * 377 / 540, sw * 78 / 960, sh * 163 / 540);
-        center(use, sh * 398 / 540, "Use OS", sw >= 1280 ? 2 : 1, 0xfaff79);
-        int x = use.x + use.w / 2, y = sh * 455 / 540;
-        rounded(rect(x - scale(15), y - scale(4), scale(30), scale(8)), 1, 0x06ff96);
-        stroke(x + scale(14), y, x + scale(4), y - scale(9), scale(4), 0x06ff96);
-        stroke(x + scale(14), y, x + scale(4), y + scale(9), scale(4), 0x06ff96);
-        target(use, USE_OS, 0);
+        welcome_screen();
         present(home.light);
         cursor(mx, my);
         dirty = 0;
@@ -2214,6 +2283,8 @@ static void repaint(void) {
         paint_window();
     if (docked() && !start)
         dock();
+    if (active < 0 && !start)
+        desktop_hub();
     if (start) {
         count = 0;
         dock();
@@ -2293,6 +2364,7 @@ static void action(int a, int arg) {
         launch(arg);
         break;
     case START:
+        welcome = 0;
         pop = 0;
         start = !start;
         choice = 0;

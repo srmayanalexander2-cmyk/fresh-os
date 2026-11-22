@@ -86,7 +86,7 @@ def verify(e, shots=None):
             g.monitor("nmi")
             g.wait("kernel stop: vector 2")
     print(
-        "PASS nine fullscreen layouts, restore, actual Max mouse target, previous mode restoration and CPU stop:",
+        "PASS twelve fullscreen layouts, restore, actual Max mouse target, previous mode restoration and CPU stop:",
         e,
     )
 

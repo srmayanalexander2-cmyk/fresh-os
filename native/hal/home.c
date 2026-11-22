@@ -189,12 +189,31 @@ static int transfer(int index, struct Home *h, int writing) {
 _Static_assert(sizeof(struct Home) <= 127 * 512, "snapshot slot");
 void home_init(void) {
     home.light = 100;
-    home.count = 1;
+    /* A blank Home disk should feel like a usable workspace, not an empty shell. */
+    home.count = 4;
     strset(home.notes[0].name, 28, "welcome.txt");
     strset(home.notes[0].body, NOTE_CAP,
-           "Welcome to FreshOS.\n\nThis is your native writing space. Press F11 to give the "
-           "page the entire screen.\n\nCtrl+S saves the current document. Attach the "
-           "supplied Home disk to keep your changes after shutdown.");
+           "Welcome to Stratus.\n\nF1 opens All Apps. F3 opens Terminal; type help for commands. "
+           "Right-click for actions. Esc returns to this desktop.\n\nTry example.mus in Media "
+           "and pattern.pbm in Photos, or edit ideas.txt in Writer.\n\nCtrl+S saves. The "
+           "supplied Home disk keeps changes after shutdown; without it, changes are session-only.");
+    strset(home.notes[1].name, 28, "example.mus");
+    strset(home.notes[1].body, NOTE_CAP,
+           "C4:1 C4:1 G4:1 G4:1 A4:1 A4:1 G4:2 F4:1 F4:1 E4:1 E4:1 D4:1 D4:1 C4:2");
+    strset(home.notes[2].name, 28, "pattern.pbm");
+    strset(home.notes[2].body, NOTE_CAP,
+           "P1\n16 8\n0 0 0 0 0 1 1 1 1 1 0 0 0 0 0 0\n"
+           "0 0 0 0 1 1 1 1 1 1 1 0 0 0 0 0\n"
+           "0 0 0 1 1 1 1 1 1 1 1 1 0 0 0 0\n"
+           "0 0 1 1 1 1 1 1 1 1 1 1 1 0 0 0\n"
+           "0 1 1 1 1 1 1 1 1 1 1 1 1 1 0 0\n"
+           "1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 0\n"
+           "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+           "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0");
+    strset(home.notes[3].name, 28, "ideas.txt");
+    strset(home.notes[3].body, NOTE_CAP,
+           "A few things to try\n\n1. Write a note and save it.\n2. Play example.mus.\n"
+           "3. View pattern.pbm.\n4. Draw in Sketch and save a PBM.\n5. Open Terminal and type help.");
     if (!mount_disk())
         return;
     state = "Home disk / writable";
