@@ -35,17 +35,223 @@ _start:
  int $0x80
  cmp %ebx,%eax
  jne bad
+ /* Exercise i386 time32/time64, clock_gettime/getres and gettimeofday. */
+ sub $16,%esp
+ mov $265,%eax
+ xor %ebx,%ebx
+ mov %esp,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ cmpl $0,(%esp)
+ je bad
+ mov 4(%esp),%eax
+ cmp $1000000000,%eax
+ jae bad
+ mov $265,%eax
+ mov $1,%ebx
+ mov %esp,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ mov 4(%esp),%eax
+ cmp $1000000000,%eax
+ jae bad
+ mov $266,%eax
+ xor %ebx,%ebx
+ mov %esp,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ cmpl $0,(%esp)
+ je .Lrt32_resolution_subsec
+ cmpl $1,(%esp)
+ jne bad
+ cmpl $0,4(%esp)
+ jne bad
+ jmp .Lrt32_resolution_ok
+.Lrt32_resolution_subsec:
+ mov 4(%esp),%eax
+ test %eax,%eax
+ jz bad
+ cmp $1000000000,%eax
+ jae bad
+.Lrt32_resolution_ok:
+ mov $266,%eax
+ mov $1,%ebx
+ mov %esp,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ cmpl $0,(%esp)
+ jne bad
+ mov 4(%esp),%eax
+ test %eax,%eax
+ jz bad
+ cmp $1000000000,%eax
+ jae bad
+ /* Exercise the i386 time64 syscall numbers as well. */
+ mov $403,%eax
+ xor %ebx,%ebx
+ mov %esp,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ cmpl $0,4(%esp)
+ jne bad
+ cmpl $0,(%esp)
+ je bad
+ mov 8(%esp),%eax
+ cmp $1000000000,%eax
+ jae bad
+ cmpl $0,12(%esp)
+ jne bad
+ mov $403,%eax
+ mov $1,%ebx
+ mov %esp,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ mov 8(%esp),%eax
+ cmp $1000000000,%eax
+ jae bad
+ cmpl $0,12(%esp)
+ jne bad
+ mov $403,%eax
+ xor %ebx,%ebx
+ xor %ecx,%ecx
+ int $0x80
+ cmp $-14,%eax
+ jne bad
+ mov $406,%eax
+ xor %ebx,%ebx
+ mov %esp,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ cmpl $0,4(%esp)
+ jne bad
+ cmpl $0,12(%esp)
+ jne bad
+ cmpl $0,(%esp)
+ je .Lrt64_resolution_subsec
+ cmpl $1,(%esp)
+ jne bad
+ cmpl $0,8(%esp)
+ jne bad
+ jmp .Lrt64_resolution_ok
+.Lrt64_resolution_subsec:
+ mov 8(%esp),%eax
+ test %eax,%eax
+ jz bad
+ cmp $1000000000,%eax
+ jae bad
+.Lrt64_resolution_ok:
+ mov $406,%eax
+ mov $1,%ebx
+ mov %esp,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ cmpl $0,(%esp)
+ jne bad
+ cmpl $0,4(%esp)
+ jne bad
+ mov 8(%esp),%eax
+ test %eax,%eax
+ jz bad
+ cmp $1000000000,%eax
+ jae bad
+ cmpl $0,12(%esp)
+ jne bad
+ mov $78,%eax
+ mov %esp,%ebx
+ xor %ecx,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ cmpl $0,(%esp)
+ je bad
+ mov 4(%esp),%eax
+ cmp $1000000,%eax
+ jae bad
+ mov $13,%eax
+ xor %ebx,%ebx
+ int $0x80
+ test %eax,%eax
+ jz bad
+ add $16,%esp
  mov $5,%eax
  mov $path,%ebx
  xor %ecx,%ecx
  int $0x80
  mov %eax,%ebx
+ mov $108,%eax
+ mov $oldstat,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ mov 8(%ecx),%eax
+ and $0170000,%eax
+ cmp $0100000,%eax
+ jne bad
+ mov 20(%ecx),%edi
+ test %edi,%edi
+ jz bad
+ cmp $16384,%edi
+ ja bad
+ mov $197,%eax
+ mov $stat64buf,%ecx
+ int $0x80
+ test %eax,%eax
+ jne bad
+ mov 16(%ecx),%eax
+ and $0170000,%eax
+ cmp $0100000,%eax
+ jne bad
+ cmpl %edi,44(%ecx)
+ jne bad
+ cmpl $0,48(%ecx)
+ jne bad
+ mov $197,%eax
+ mov $3,%ebx
+ xor %ecx,%ecx
+ int $0x80
+ cmp $-14,%eax
+ jne bad
+ mov $300,%eax
+ mov $-100,%ebx
+ mov $path,%ecx
+ mov $stat64buf,%edx
+ xor %esi,%esi
+ int $0x80
+ test %eax,%eax
+ jne bad
+ mov 16(%edx),%eax
+ and $0170000,%eax
+ cmp $0100000,%eax
+ jne bad
+ cmpl %edi,44(%edx)
+ jne bad
+ cmpl $0,48(%edx)
+ jne bad
+ mov $300,%eax
+ mov $-100,%ebx
+ xor %ecx,%ecx
+ mov $stat64buf,%edx
+ xor %esi,%esi
+ int $0x80
+ cmp $-14,%eax
+ jne bad
+ mov $3,%ebx
  mov $3,%eax
  mov $buf,%ecx
  mov $100,%edx
  int $0x80
  cmp $0,%eax
  jle bad
+ cmp %edi,%eax
+ jne bad
  mov %eax,%edx
  mov $4,%eax
  mov $1,%ebx
@@ -59,3 +265,7 @@ done: mov $1,%eax
 path: .asciz "greeting.txt"
 .bss
 buf: .skip 100
+.align 4
+oldstat: .skip 64
+.align 4
+stat64buf: .skip 96

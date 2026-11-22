@@ -30,7 +30,7 @@ def seed(d):
         ("win64", "hello64.exe", [], []),
         ("windll", "dllmain.exe", ["greeting.dll"], []),
         ("linux32", "linux32.elf", [], ["greeting.txt"]),
-        ("linux64", "linux64.elf", [], []),
+        ("linux64", "linux64.elf", [], ["greeting.txt"]),
     ]:
         data = pack(d / file, [d / i for i in libs], [d / i for i in res])
         install(d / "Home.img", name, data, staged=name == "windll")

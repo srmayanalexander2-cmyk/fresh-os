@@ -12,6 +12,17 @@ _start:
  je timeout
  cmpb $'f',(%r12)
  je fault
+ /* fstat on the captured stdout device reports a character device. */
+ sub $160,%rsp
+ mov $5,%eax
+ mov $1,%edi
+ mov %rsp,%rsi
+ syscall
+ test %rax,%rax
+ jne bad
+ cmpl $8630,24(%rsp)
+ jne bad
+ add $160,%rsp
  /* Linux brk grows a writable heap, releases whole pages on shrink, and
   * zeroes those pages when the break grows again. */
  mov $12,%eax

@@ -3,6 +3,9 @@ static void linux_native(VM *v) {
     u64 nr = v->r[0], a = v->r[7], b = v->r[6], c = v->r[2], d = v->r[10];
     u64 ret = (u64)-22;
     switch (nr) {
+    case 5:
+        ret = linux_fstat(v, (u32)a, b, 0);
+        break;
     case 9:
         if (!a && d == 0x22 && (int)v->r[8] == -1 && !v->r[9] &&
             (c == 0 || c == 1 || c == 3 || c == 5)) {
@@ -26,6 +29,21 @@ static void linux_native(VM *v) {
         break;
     case 12:
         ret = linux_brk(v, a);
+        break;
+    case 96:
+        ret = linux_gettimeofday(v, a, b, 1);
+        break;
+    case 201:
+        ret = linux_time(v, a, 1);
+        break;
+    case 228:
+        ret = linux_clock_gettime(v, a, b, 1);
+        break;
+    case 229:
+        ret = linux_clock_getres(v, a, b, 1);
+        break;
+    case 262:
+        ret = linux_fstatat(v, (int)a, b, c, (u32)d, 0);
         break;
     case 158:
         if (a == 0x1002 && b < (1ull << 47)) {

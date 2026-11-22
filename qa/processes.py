@@ -65,9 +65,14 @@ def check(e, busybox):
                 g.key("f3")
                 for args in [
                     ("echo", "freshos"),
+                    ("printf", "freshos"),
+                    ("basename", "/tmp/stratus.txt"),
                     ("cat", "data.txt"),
+                    ("head", "-n", "1", "data.txt"),
+                    ("cut", "-f", "1", "data.txt"),
                     ("wc", "data.txt"),
                     ("sort", "data.txt"),
+                    ("true",),
                     ("false",),
                 ]:
                     # Compare to running the identical executable under Linux.

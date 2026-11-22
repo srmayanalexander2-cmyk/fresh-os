@@ -5,6 +5,7 @@
 #include "compat.h"
 #include "region64.h"
 #include "package.h"
+extern volatile u32 ticks;
 #ifdef __x86_64__
 #define IMAGE_MAX (4u << 20) /* raw PE; packaged IMP2 retains FILE_LIMIT */
 #else
@@ -28,7 +29,7 @@ static struct {
     u8 image[IMAGE_MAX] __attribute__((aligned(4096)));
     u8 heap[HEAP_SIZE] __attribute__((aligned(4096)));
     u8 stackmem[STACK_SIZE] __attribute__((aligned(4096)));
-    u8 perm[IMAGE_MAX / 4096], docbuf[16384];
+    u8 perm[IMAGE_MAX / 4096], docbuf[16384], statbuf[16384];
 #ifdef __x86_64__
     u32 guard_targets[4096]; /* Not mapped into guest page tables. */
 #endif
@@ -425,6 +426,197 @@ void compat_clock(u16 y, u16 m, u16 dow, u16 day, u16 h, u16 min, u16 sec) {
     systime[4] = h;
     systime[5] = min;
     systime[6] = sec;
+}
+static int leap_year(u32 y) {
+    return !(y % 4) && ((y % 100) || !(y % 400));
+}
+static u64 linux_realtime(void) {
+    u32 y = systime[0], m = systime[1], d = systime[3];
+    static const u8 month_days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (y < 1970 || m < 1 || m > 12 || d < 1 || systime[4] > 23 || systime[5] > 59 ||
+        systime[6] > 59)
+        return 0;
+    u32 max_day = month_days[m - 1] + (m == 2 && leap_year(y));
+    if (d > max_day)
+        return 0;
+    u64 days = 0;
+    for (u32 year = 1970; year < y; year++)
+        days += leap_year(year) ? 366 : 365;
+    for (u32 month = 1; month < m; month++)
+        days += month_days[month - 1] + (month == 2 && leap_year(y));
+    days += d - 1;
+    return days * 86400 + systime[4] * 3600 + systime[5] * 60 + systime[6];
+}
+static u8 *linux_mem(VM *v, u64 addr, u32 size, int access) {
+    const char *previous = v->err;
+    u8 *p = mem(v, addr, size, access);
+    if (!previous && !p)
+        v->err = 0;
+    return p;
+}
+static int linux_clock_value(u64 id, u64 *sec, u64 *nsec) {
+    if (id == 0 || id == 5) {
+        *sec = linux_realtime();
+        *nsec = 0;
+    } else if (id == 1 || id == 4 || id == 6 || id == 7) {
+        u32 t = ticks;
+        *sec = t / 60;
+        *nsec = ((t % 60) * 50000000u) / 3;
+    } else
+        return 0;
+    return 1;
+}
+static u64 linux_clock_gettime(VM *v, u64 id, u64 dest, int time64) {
+    u64 sec, nsec;
+    if (!linux_clock_value(id, &sec, &nsec))
+        return (u64)-22;
+    int width = time64 ? 8 : 4;
+    if (!time64 && sec > 0x7fffffffu)
+        return (u64)-75;
+    u8 *p = linux_mem(v, dest, 2 * width, WRT);
+    if (!p)
+        return (u64)-14;
+    put(p, width, sec);
+    put(p + width, width, nsec);
+    return 0;
+}
+static u64 linux_clock_getres(VM *v, u64 id, u64 dest, int time64) {
+    u64 sec, nsec;
+    if (!linux_clock_value(id, &sec, &nsec))
+        return (u64)-22;
+    if (!dest)
+        return 0;
+    int width = time64 ? 8 : 4;
+    u8 *p = linux_mem(v, dest, 2 * width, WRT);
+    if (!p)
+        return (u64)-14;
+    put(p, width, id == 0 || id == 5 ? 1 : 0);
+    put(p + width, width, id == 0 || id == 5 ? 0 : 16666667u);
+    return 0;
+}
+static u64 linux_gettimeofday(VM *v, u64 dest, u64 timezone, int time64) {
+    u64 sec = linux_realtime();
+    if (dest && !time64 && sec > 0x7fffffffu)
+        return (u64)-75;
+    if (dest) {
+        int width = time64 ? 8 : 4;
+        u8 *p = linux_mem(v, dest, 2 * width, WRT);
+        if (!p)
+            return (u64)-14;
+        put(p, width, sec);
+        put(p + width, width, 0);
+    }
+    if (timezone) {
+        u8 *p = linux_mem(v, timezone, 8, WRT);
+        if (!p)
+            return (u64)-14;
+        memset(p, 0, 8);
+    }
+    return 0;
+}
+static u64 linux_time(VM *v, u64 dest, int time64) {
+    u64 sec = linux_realtime();
+    if (dest) {
+        int width = time64 ? 8 : 4;
+        if (!time64 && sec > 0x7fffffffu)
+            return (u64)-75;
+        u8 *p = linux_mem(v, dest, width, WRT);
+        if (!p)
+            return (u64)-14;
+        put(p, width, sec);
+    }
+    return sec;
+}
+static u64 linux_stat_write(VM *v, u64 dest, int format, u32 mode, u32 size, u32 ino) {
+    u64 sec = linux_realtime(), blocks = (size + 511) / 512;
+    u32 bytes = format == 0 ? 144 : format == 1 ? 64 : 96;
+    if (format != 0 && (sec > 0x7fffffffu || (format == 1 && size > 0x7fffffffu)))
+        return (u64)-75;
+    u8 *p = linux_mem(v, dest, bytes, WRT);
+    if (!p)
+        return (u64)-14;
+    memset(p, 0, bytes);
+    if (format == 0) {
+        put(p, 8, 1);
+        put(p + 8, 8, ino);
+        put(p + 16, 8, 1);
+        put(p + 24, 4, mode);
+        put(p + 28, 4, 1000);
+        put(p + 32, 4, 1000);
+        put(p + 48, 8, size);
+        put(p + 56, 8, 4096);
+        put(p + 64, 8, blocks);
+        put(p + 72, 8, sec);
+        put(p + 88, 8, sec);
+        put(p + 104, 8, sec);
+    } else if (format == 1) {
+        put(p, 4, 1);
+        put(p + 4, 4, ino);
+        put(p + 8, 2, mode);
+        put(p + 10, 2, 1);
+        put(p + 12, 2, 1000);
+        put(p + 14, 2, 1000);
+        put(p + 20, 4, size);
+        put(p + 24, 4, 4096);
+        put(p + 28, 4, blocks);
+        put(p + 32, 4, sec);
+        put(p + 40, 4, sec);
+        put(p + 48, 4, sec);
+    } else {
+        put(p, 8, 1);
+        put(p + 12, 4, ino);
+        put(p + 16, 4, mode);
+        put(p + 20, 4, 1);
+        put(p + 24, 4, 1000);
+        put(p + 28, 4, 1000);
+        put(p + 44, 8, size);
+        put(p + 52, 4, 4096);
+        put(p + 56, 8, blocks);
+        put(p + 64, 4, sec);
+        put(p + 72, 4, sec);
+        put(p + 80, 4, sec);
+        put(p + 88, 8, ino);
+    }
+    return 0;
+}
+static u64 linux_fstat(VM *v, u32 fd, u64 dest, int format) {
+    u32 mode, size = 0, ino;
+    if (fd <= 2) {
+        mode = 0020666;
+        ino = (u32)fd + 1;
+    } else if (fd == 3 && CURRENT.doclen >= 0) {
+        mode = 0100444;
+        size = CURRENT.doclen;
+        ino = 3;
+    } else
+        return (u64)-9;
+    return linux_stat_write(v, dest, format, mode, size, ino);
+}
+static u64 linux_fstatat(VM *v, int dirfd, u64 path, u64 dest, u32 flags, int format) {
+    if (dirfd != -100 || (flags & ~0x100u))
+        return (u64)-22;
+    if (!CURRENT.document_read)
+        return (u64)-2;
+    char name[32];
+    int terminated = 0;
+    for (u32 i = 0; i < sizeof name; i++) {
+        u8 *ch = linux_mem(v, path + i, 1, R);
+        if (!ch)
+            return (u64)-14;
+        name[i] = *ch;
+        if (!name[i]) {
+            terminated = 1;
+            break;
+        }
+    }
+    if (!terminated)
+        return (u64)-36;
+    if (!text_name(name))
+        return (u64)-2;
+    int size = CURRENT.document_read(name, CURRENT.statbuf, sizeof CURRENT.statbuf);
+    if (size < 0)
+        return (u64)-2;
+    return linux_stat_write(v, dest, format, 0100444, size, 4);
 }
 /* Shell argv subset: plain words and quoted spans. Reject ambiguous backslash/quote
  * runs rather than silently handing the application a different file name. Return
@@ -1077,6 +1269,18 @@ static int cond(VM *v, int k) {
 static void linux_call(VM *v, u64 call, u64 fd, u64 addr, u64 sz) {
     if (call == 12)
         v->r[0] = linux_brk(v, fd);
+    else if (call == 5)
+        v->r[0] = linux_fstat(v, (u32)fd, addr, v->wide ? 0 : 1);
+    else if (call == 262)
+        v->r[0] = linux_fstatat(v, (int)fd, addr, sz, 0, v->wide ? 0 : 1);
+    else if (call == 96)
+        v->r[0] = linux_gettimeofday(v, fd, addr, v->wide);
+    else if (call == 201)
+        v->r[0] = linux_time(v, fd, v->wide);
+    else if (call == 228)
+        v->r[0] = linux_clock_gettime(v, fd, addr, v->wide);
+    else if (call == 229)
+        v->r[0] = linux_clock_getres(v, fd, addr, v->wide);
     else if (call == 60 || call == 231) {
         v->done = 1;
         v->res->exit_code = fd & 255;
@@ -1140,14 +1344,32 @@ static void linux_call(VM *v, u64 call, u64 fd, u64 addr, u64 sz) {
 }
 static void linux32_call(VM *v) {
     u32 id = v->r[0];
+    if (id == 403 || id == 406) {
+        v->r[0] = id == 403 ? linux_clock_gettime(v, (u32)v->r[3], (u32)v->r[1], 1)
+                            : linux_clock_getres(v, (u32)v->r[3], (u32)v->r[1], 1);
+        return;
+    }
+    if (id == 108 || id == 197) {
+        v->r[0] = linux_fstat(v, (u32)v->r[3], (u32)v->r[1], id == 108 ? 1 : 2);
+        return;
+    }
+    if (id == 300) {
+        v->r[0] = linux_fstatat(v, (int)(u32)v->r[3], (u32)v->r[1], (u32)v->r[2],
+                                (u32)v->r[6], 2);
+        return;
+    }
     u32 call = id == 1 || id == 252 ? 60
                : id == 4            ? 1
                : id == 3            ? 0
                : id == 5            ? 2
                : id == 6            ? 3
+               : id == 13           ? 201
                : id == 20           ? 39
                : id == 45           ? 12
+               : id == 78           ? 96
                : id == 224          ? 186
+               : id == 265          ? 228
+               : id == 266          ? 229
                                     : ~0u;
     linux_call(v, call, (u32)v->r[3], (u32)v->r[1], (u32)v->r[2]);
 }

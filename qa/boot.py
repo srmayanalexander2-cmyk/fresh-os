@@ -77,7 +77,7 @@ class Guest:
 
     def type(self, s):
         for c in s:
-            self.key({" ": "spc", ".": "dot", "\n": "ret", "-": "minus"}.get(c, c))
+            self.key({" ": "spc", ".": "dot", "\n": "ret", "-": "minus", "/": "slash"}.get(c, c))
 
     def shot(self, path):
         f = self.d / "screen.ppm"

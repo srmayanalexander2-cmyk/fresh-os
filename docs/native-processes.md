@@ -29,7 +29,7 @@ python forge/media.py Lite
 python qa/processes.py Lite
 ```
 
-The test boots the guest, exercises an actual PE32+ `cal.exe`, checks Windows reservation/commit/protection/decommit/zero-on-recommit/release, and checks Linux brk growth, shrink/recommit zeroing, and anonymous mapping/protection/unmapping. Its ELF test checks the CPU privilege level. A write to its own read-only mapping, an intentional invalid instruction, and a CPU loop verify that an application terminates without losing the desktop. A subsequent ELF launch must succeed. The existing `qa/packages.py Lite --efi` also checks the local Windows DLL call, synchronous Win32 dialog, resources and install persistence. Disable Secure Boot and provide an OVMF firmware pair as in `qa/boot.py`.
+The test boots the guest, exercises an actual PE32+ `cal.exe`, checks Windows reservation/commit/protection/decommit/zero-on-recommit/release, and checks Linux brk growth, shrink/recommit zeroing, and anonymous mapping/protection/unmapping. Its ELF test checks the CPU privilege level. A write to its own read-only mapping, an intentional invalid instruction, and a CPU loop verify that an application terminates without losing the desktop. A subsequent ELF launch must succeed. The `qa/packages.py Lite` BIOS/UEFI runs also exercise i386/x86-64 static Linux resource access, `fstat`/`newfstatat`, clock calls and brk behavior, alongside the local Windows DLL call, synchronous Win32 dialog and install persistence. Disable Secure Boot and provide an OVMF firmware pair as in `qa/boot.py`.
 
 **Independent Linux application test.** Build upstream musl 1.2.5 and BusyBox 1.36.1 on an x86-64 Linux host (C compiler, binutils, GNU make, standard build shell utilities). This optional step downloads pinned sources, not a modified application. BusyBox is not redistributed in the FreshOS ZIP.
 
@@ -38,7 +38,7 @@ qa/build-busybox.sh /tmp/fresh-bb
 python qa/processes.py Lite --busybox /tmp/fresh-bb/busybox-src/busybox
 ```
 
-The same BusyBox ELF is run on Linux and in the booted FreshOS guest: echo, cat, wc, sort and false. Output/exit status are compared; `wc` and `sort` consume actual bundled file data. To use it interactively, pack it with `forge/imp.py pack --native64 ... --resource data.txt`, install it on a powered-off Home disk under the name `busybox`, then `run busybox wc data.txt`. Passing a few applets does not imply that all BusyBox applets or all musl programs work.
+The same BusyBox ELF is run on Linux and in the booted FreshOS guest: echo, printf, basename, cat, head, cut, wc, sort, true and false. Output/exit status are compared; the file applets consume actual bundled data. To use it interactively, pack it with `forge/imp.py pack --native64 ... --resource data.txt`, install it on a powered-off Home disk under the name `busybox`, then `run busybox wc data.txt`. Passing a few applets does not imply that all BusyBox applets or all musl programs work.
 
 **Chrome remains outside the supported set.** Windows Chrome needs concurrent child processes, threads, substantially more memory, NT/Win32 synchronization and file/registry services, networking, and the browser's graphics and sandbox contracts. IMP packaging and user-mode instruction execution do not implement those services. The Chrome acceptance test (official installer, launch, HTTPS navigation, profile persistence on restart) has **not passed**.
 
